@@ -8,10 +8,7 @@ interface MovixApi {
     @GET("api/search")
     suspend fun search(@Query("title") title: String): MovixSearchResponse
 
-    /**
-     * Récupère les sources de stream pour un film ou un épisode.
-     * type = "movie" ou "tv". Pour un épisode, fournir season + episode.
-     */
+    // ─── Coflix / Movix 1 ───────────────────────────────────────────────────
     @GET("api/tmdb/{type}/{id}")
     suspend fun sources(
         @Path("type") type: String,
@@ -19,4 +16,29 @@ interface MovixApi {
         @Query("season") season: Int? = null,
         @Query("episode") episode: Int? = null
     ): MovixSourcesResponse
+
+    // ─── Cpasmal / Viper ────────────────────────────────────────────────────
+    @GET("api/cpasmal/movie/{id}")
+    suspend fun cpasmalMovie(@Path("id") tmdbId: Long): CpasmalResponse
+
+    @GET("api/cpasmal/tv/{id}/{season}/{episode}")
+    suspend fun cpasmalTv(
+        @Path("id") tmdbId: Long,
+        @Path("season") season: Int,
+        @Path("episode") episode: Int
+    ): CpasmalResponse
+
+    // ─── Wiflix / Lynx ──────────────────────────────────────────────────────
+    @GET("api/wiflix/movie/{id}")
+    suspend fun wiflixMovie(@Path("id") tmdbId: Long): WiflixResponse
+
+    @GET("api/wiflix/tv/{id}/{season}")
+    suspend fun wiflixTvSeason(
+        @Path("id") tmdbId: Long,
+        @Path("season") season: Int
+    ): WiflixResponse
+
+    // ─── FStream ────────────────────────────────────────────────────────────
+    @GET("api/fstream/movie/{id}")
+    suspend fun fstreamMovie(@Path("id") tmdbId: Long): FstreamResponse
 }

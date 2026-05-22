@@ -19,7 +19,7 @@ import com.squareup.moshi.JsonClass
 data class MovixSourcesResponse(
     @Json(name = "tmdb_details") val tmdbDetails: MovixTmdbDetails? = null,
     @Json(name = "iframe_src") val iframeSrc: String? = null,
-    @Json(name = "player_links") val playerLinks: List<MovixLink>? = null,
+    @Json(name = "player_links") val playerLinks: List<TmdbProviderLink>? = null,
     val seasons: List<MovixSeasonInfo>? = null,
     @Json(name = "current_episode") val currentEpisode: MovixCurrentEpisode? = null,
     val message: String? = null
@@ -43,21 +43,97 @@ data class MovixCurrentEpisode(
     @Json(name = "episode_number") val episodeNumber: Int? = null,
     val title: String? = null,
     @Json(name = "iframe_src") val iframeSrc: String? = null,
-    @Json(name = "player_links") val playerLinks: List<MovixLink>? = null
+    @Json(name = "player_links") val playerLinks: List<TmdbProviderLink>? = null
 )
 
-@JsonClass(generateAdapter = true)
+/**
+ * Lien de stream unifié, indépendant du provider d'origine.
+ * Le `category` permet de regrouper dans l'UI ("Movix 1", "Viper VF",
+ * "Wiflix VF", "FStream VFQ", etc.).
+ */
 data class MovixLink(
+    val url: String,
+    val host: String? = null,
+    val language: String? = null,
+    val quality: String? = null,
+    val category: String = "Source"
+) {
+    fun bestUrl(): String = url
+    fun displayName(): String = listOfNotNull(
+        host?.takeIf { it.isNotBlank() },
+        quality?.takeIf { it.isNotBlank() },
+        language?.takeIf { it.isNotBlank() }
+    ).joinToString(" • ").ifBlank { "Source" }
+}
+
+// Parseur Moshi générique pour les anciennes réponses {decoded_url, quality, language, clone_url}
+@JsonClass(generateAdapter = true)
+data class TmdbProviderLink(
     @Json(name = "decoded_url") val decodedUrl: String? = null,
     @Json(name = "clone_url") val cloneUrl: String? = null,
     val quality: String? = null,
     val language: String? = null
 ) {
     fun bestUrl(): String? = decodedUrl ?: cloneUrl
-    fun displayName(): String = listOfNotNull(quality, language)
-        .joinToString(" • ")
-        .ifBlank { "Source" }
 }
+
+// Cpasmal / Viper : {links: {vf: [{server, url}], vostfr: [...]}}
+@JsonClass(generateAdapter = true)
+data class CpasmalResponse(
+    val title: String? = null,
+    val year: String? = null,
+    val links: CpasmalGroups? = null
+)
+@JsonClass(generateAdapter = true)
+data class CpasmalGroups(
+    val vf: List<CpasmalLink>? = null,
+    val vostfr: List<CpasmalLink>? = null
+)
+@JsonClass(generateAdapter = true)
+data class CpasmalLink(
+    val server: String? = null,
+    val url: String? = null
+)
+
+// Wiflix / Lynx : {players: {vf: [{name, url, type}], vostfr: [...]}}
+@JsonClass(generateAdapter = true)
+data class WiflixResponse(
+    val success: Boolean? = null,
+    val title: String? = null,
+    val players: WiflixGroups? = null
+)
+@JsonClass(generateAdapter = true)
+data class WiflixGroups(
+    val vf: List<WiflixLink>? = null,
+    val vostfr: List<WiflixLink>? = null
+)
+@JsonClass(generateAdapter = true)
+data class WiflixLink(
+    val name: String? = null,
+    val url: String? = null,
+    val type: String? = null
+)
+
+// FStream : {players: {VFQ: [...], VFF: [...], VOSTFR: [...], Default: [...]}}
+@JsonClass(generateAdapter = true)
+data class FstreamResponse(
+    val success: Boolean? = null,
+    val players: FstreamGroups? = null
+)
+@JsonClass(generateAdapter = true)
+data class FstreamGroups(
+    @Json(name = "VFQ") val vfq: List<FstreamLink>? = null,
+    @Json(name = "VFF") val vff: List<FstreamLink>? = null,
+    @Json(name = "VOSTFR") val vostfr: List<FstreamLink>? = null,
+    @Json(name = "Default") val default: List<FstreamLink>? = null
+)
+@JsonClass(generateAdapter = true)
+data class FstreamLink(
+    val url: String? = null,
+    val type: String? = null,
+    val quality: String? = null,
+    val player: String? = null
+)
 
 @JsonClass(generateAdapter = true)
 data class MovixSeasonInfo(

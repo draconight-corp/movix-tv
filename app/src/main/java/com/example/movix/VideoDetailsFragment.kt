@@ -22,7 +22,6 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.CustomTarget
 import com.bumptech.glide.request.transition.Transition
 import com.example.movix.data.MovixLink
-import com.example.movix.data.MovixSourcesResponse
 import com.example.movix.data.Repository
 import com.example.movix.data.TmdbItem
 import com.example.movix.history.WatchHistory
@@ -230,59 +229,48 @@ class VideoDetailsFragment : DetailsSupportFragment() {
     private fun resolveAndPlay(m: Movie, season: Int?, episode: Int?) {
         Toast.makeText(requireContext(), R.string.loading, Toast.LENGTH_SHORT).show()
         lifecycleScope.launch {
-            val sources = runCatching {
+            val links = runCatching {
                 withContext(Dispatchers.IO) {
-                    Repository.resolveSources(m.tmdbId, m.isTv, season, episode)
+                    Repository.aggregateAllSources(m.tmdbId, m.isTv, season, episode)
                 }
-            }.getOrNull()
-            val links = collectLinks(sources, season, episode)
+            }.getOrDefault(emptyList())
             if (links.isEmpty()) {
                 Toast.makeText(requireContext(), R.string.no_sources, Toast.LENGTH_LONG).show()
                 return@launch
             }
-            // Enregistre dans l'historique dès qu'on a un truc à jouer
             WatchHistory.record(requireContext().applicationContext, m, season, episode)
             if (links.size == 1) {
                 launchPlayer(m, links, 0)
                 return@launch
             }
-            val labels = links.map { it.displayName() }.toTypedArray()
+            // Groupage par catégorie, séparateurs visuels.
+            val grouped = links.groupBy { it.category }
+            val labels = mutableListOf<String>()
+            val flat = mutableListOf<MovixLink>()
+            grouped.forEach { (category, items) ->
+                labels.add("── $category (${items.size}) ──")
+                flat.add(items.first()) // placeholder dummy, ne sera pas cliqué (titre non sélectionnable)
+                items.forEach {
+                    labels.add("  ${it.displayName()}")
+                    flat.add(it)
+                }
+            }
+            // setItems ne supporte pas le mode "header non cliquable" facilement —
+            // on prend une approche plus simple : juste afficher labels avec préfixe de catégorie.
+            val flatLabels = links.map { "[${it.category}]  ${it.displayName()}" }.toTypedArray()
             AlertDialog.Builder(requireContext(), R.style.MovixDialog)
-                .setTitle(R.string.choose_source)
-                .setItems(labels) { _, idx -> launchPlayer(m, links, idx) }
+                .setTitle("Sources (${links.size}) — ${grouped.size} catégorie(s)")
+                .setItems(flatLabels) { _, idx -> launchPlayer(m, links, idx) }
                 .show()
         }
     }
 
-    private fun collectLinks(
-        sources: MovixSourcesResponse?,
-        season: Int?,
-        episode: Int?
-    ): List<MovixLink> {
-        if (sources == null) return emptyList()
-
-        // Pour film : player_links + iframe_src en racine
-        // Pour épisode : current_episode.player_links + current_episode.iframe_src
-        val episodePayload = sources.currentEpisode
-        val links = if (season != null && episode != null && episodePayload != null) {
-            (episodePayload.playerLinks ?: emptyList()) +
-                    listOfNotNull(episodePayload.iframeSrc?.let { iframeLink(it) })
-        } else {
-            (sources.playerLinks ?: emptyList()) +
-                    listOfNotNull(sources.iframeSrc?.let { iframeLink(it) })
-        }
-
-        return links.filter { !it.bestUrl().isNullOrBlank() }
-    }
-
-    private fun iframeLink(url: String): MovixLink =
-        MovixLink(decodedUrl = url, quality = "Lecteur principal", language = "FR")
 
     private fun launchPlayer(m: Movie, links: List<MovixLink>, selectedIdx: Int) {
         val link = links.getOrNull(selectedIdx) ?: return
-        val url = link.bestUrl() ?: return
-        val urls = ArrayList(links.mapNotNull { it.bestUrl() })
-        val labels = ArrayList(links.map { it.displayName() })
+        val url = link.bestUrl()
+        val urls = ArrayList(links.map { it.bestUrl() })
+        val labels = ArrayList(links.map { "[${it.category}] ${it.displayName()}" })
 
         val intent = if (isDirectStream(url)) {
             Intent(requireActivity(), PlaybackActivity::class.java).apply {

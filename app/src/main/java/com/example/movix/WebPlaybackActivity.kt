@@ -8,12 +8,14 @@ import android.view.View
 import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
+import com.example.movix.webfilter.AdBlocker
 
 class WebPlaybackActivity : FragmentActivity() {
 
@@ -65,18 +67,43 @@ class WebPlaybackActivity : FragmentActivity() {
                 setSupportMultipleWindows(false)
                 javaScriptCanOpenWindowsAutomatically = false
             }
-            webChromeClient = WebChromeClient()
+            webChromeClient = object : WebChromeClient() {
+                // Refuse toute ouverture de nouvelle fenêtre (popunders).
+                override fun onCreateWindow(
+                    view: WebView, isDialog: Boolean,
+                    isUserGesture: Boolean, resultMsg: android.os.Message
+                ): Boolean = false
+            }
             webViewClient = object : WebViewClient() {
+                override fun shouldInterceptRequest(
+                    view: WebView, request: WebResourceRequest
+                ): WebResourceResponse? {
+                    val u = request.url.toString()
+                    return if (AdBlocker.shouldBlock(u)) AdBlocker.emptyResponse() else null
+                }
+
                 override fun shouldOverrideUrlLoading(
                     view: WebView, request: WebResourceRequest
                 ): Boolean {
                     val target = request.url.toString()
+                    // Intents externes interdits
                     if (target.startsWith("intent:") || target.startsWith("market:") ||
-                        target.contains("play.google.com") || target.startsWith("mailto:")
-                    ) {
-                        return true
-                    }
+                        target.contains("play.google.com") || target.startsWith("mailto:") ||
+                        target.startsWith("tel:") || target.startsWith("sms:")
+                    ) return true
+                    // Hosts dans la blocklist → bloque la navigation aussi
+                    if (AdBlocker.shouldBlock(target)) return true
                     return false
+                }
+
+                override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                    super.onPageStarted(view, url, favicon)
+                    view.evaluateJavascript(AdBlocker.ANTI_POPUP_JS, null)
+                }
+
+                override fun onPageFinished(view: WebView, url: String?) {
+                    super.onPageFinished(view, url)
+                    view.evaluateJavascript(AdBlocker.ANTI_POPUP_JS, null)
                 }
             }
             isFocusable = true
