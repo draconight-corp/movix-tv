@@ -2,6 +2,7 @@ package com.example.movix.data
 
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import com.example.movix.update.GithubApi
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -53,5 +54,14 @@ object ApiClient {
             .addConverterFactory(MoshiConverterFactory.create(moshi).asLenient())
             .build()
             .create(MovixApi::class.java)
+    }
+
+    val github: GithubApi by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://api.github.com/")
+            .client(okHttp)
+            .addConverterFactory(MoshiConverterFactory.create(moshi).asLenient())
+            .build()
+            .create(GithubApi::class.java)
     }
 }

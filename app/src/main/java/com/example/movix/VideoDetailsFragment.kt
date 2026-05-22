@@ -123,7 +123,7 @@ class VideoDetailsFragment : DetailsSupportFragment() {
     }
 
     private fun fetchTmdbDetails() {
-        viewLifecycleOwner.lifecycleScope.launch {
+        lifecycleScope.launch {
             val item = withContext(Dispatchers.IO) {
                 Repository.details(TmdbItem(
                     id = movie.tmdbId,
@@ -150,7 +150,7 @@ class VideoDetailsFragment : DetailsSupportFragment() {
     }
 
     private fun chooseSeasonAndEpisode() {
-        viewLifecycleOwner.lifecycleScope.launch {
+        lifecycleScope.launch {
             val item = tmdbItem ?: withContext(Dispatchers.IO) {
                 Repository.details(TmdbItem(id = movie.tmdbId, mediaType = "tv"))
             }
@@ -172,7 +172,7 @@ class VideoDetailsFragment : DetailsSupportFragment() {
     }
 
     private fun chooseEpisode(season: Int) {
-        viewLifecycleOwner.lifecycleScope.launch {
+        lifecycleScope.launch {
             val seasonDetail = withContext(Dispatchers.IO) {
                 Repository.seasonDetails(movie.tmdbId, season)
             }
@@ -195,7 +195,7 @@ class VideoDetailsFragment : DetailsSupportFragment() {
 
     private fun resolveAndPlay(season: Int?, episode: Int?) {
         Toast.makeText(requireContext(), R.string.loading, Toast.LENGTH_SHORT).show()
-        viewLifecycleOwner.lifecycleScope.launch {
+        lifecycleScope.launch {
             val sources = withContext(Dispatchers.IO) {
                 Repository.resolveSources(movie.tmdbId, movie.isTv, season, episode)
             }
