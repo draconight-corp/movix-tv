@@ -29,6 +29,7 @@ import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.CustomTarget
 import com.bumptech.glide.request.transition.Transition
 import com.example.movix.data.Repository
+import com.example.movix.history.WatchHistory
 import kotlinx.coroutines.launch
 import java.util.Timer
 import java.util.TimerTask
@@ -86,16 +87,39 @@ class MainFragment : BrowseSupportFragment() {
             val rows = runCatching { Repository.rows() }.getOrDefault(emptyList())
             val cardPresenter = CardPresenter()
             rowsAdapter.clear()
-            rows.forEachIndexed { index, (title, items) ->
+
+            // Row "Reprendre" en tête, si historique
+            val history = WatchHistory.all(requireContext().applicationContext)
+            var rowIndex = 0L
+            if (history.isNotEmpty()) {
+                val resumeAdapter = ArrayObjectAdapter(cardPresenter)
+                history.forEach { entry ->
+                    val tag = if (entry.isTv && entry.lastSeason != null && entry.lastEpisode != null) {
+                        "S${entry.lastSeason.toString().padStart(2, '0')}E${entry.lastEpisode.toString().padStart(2, '0')}"
+                    } else null
+                    resumeAdapter.add(Movie(
+                        id = entry.tmdbId,
+                        tmdbId = entry.tmdbId,
+                        isTv = entry.isTv,
+                        title = entry.title,
+                        cardImageUrl = entry.posterUrl,
+                        backgroundImageUrl = entry.backdropUrl,
+                        year = tag
+                    ))
+                }
+                rowsAdapter.add(ListRow(HeaderItem(rowIndex++, "Reprendre"), resumeAdapter))
+            }
+
+            rows.forEach { (title, items) ->
                 val rowAdapter = ArrayObjectAdapter(cardPresenter)
                 items.forEach { rowAdapter.add(Movie.fromTmdb(it)) }
-                val header = HeaderItem(index.toLong(), title)
+                val header = HeaderItem(rowIndex++, title)
                 rowsAdapter.add(ListRow(header, rowAdapter))
             }
 
             // Row "À propos" en fin de liste — la version apparaît dans le drawer gauche
             val infoHeader = HeaderItem(
-                rows.size.toLong(),
+                rowIndex,
                 "Movix TV  •  v${BuildConfig.VERSION_NAME}"
             )
             val infoAdapter = ArrayObjectAdapter(InfoItemPresenter())

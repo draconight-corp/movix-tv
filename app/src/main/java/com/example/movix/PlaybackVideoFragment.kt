@@ -102,6 +102,14 @@ class PlaybackVideoFragment : VideoSupportFragment() {
         requireActivity().finish()
     }
 
+    fun changeSource(newUrl: String) {
+        val exo = player ?: return
+        val newItem = buildMediaItem(newUrl, glue.title?.toString().orEmpty())
+        exo.setMediaItem(newItem)
+        exo.prepare()
+        exo.playWhenReady = true
+    }
+
     override fun onStart() {
         super.onStart()
         player?.playWhenReady = true

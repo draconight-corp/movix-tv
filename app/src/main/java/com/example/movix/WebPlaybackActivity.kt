@@ -1,37 +1,32 @@
 package com.example.movix
 
 import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.os.Bundle
+import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 
-/**
- * Lecteur pour les sources Movix qui sont des pages embed HTML
- * (la majorité des player_links : uqload, vidmoly, voe, etc.).
- *
- * On charge la page dans une WebView plein écran, JavaScript actif,
- * autoplay sans geste utilisateur. La page embed gère son propre player.
- *
- * Note télécommande : les flèches D-pad / OK sont transmis à la WebView
- * comme événements clavier. La plupart des players HTML5 répondent à
- * Espace=pause, ←/→=seek.
- */
 class WebPlaybackActivity : FragmentActivity() {
 
     private lateinit var webView: WebView
+    private val urls: List<String> by lazy { intent.getStringArrayListExtra(EXTRA_URLS) ?: emptyList() }
+    private val labels: List<String> by lazy { intent.getStringArrayListExtra(EXTRA_LABELS) ?: emptyList() }
+    private var currentIndex: Int = 0
+    private var longPressFired = false
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Plein écran sans barre de système
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.decorView.systemUiVisibility = (
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
@@ -42,6 +37,7 @@ class WebPlaybackActivity : FragmentActivity() {
                 )
 
         val url = intent.getStringExtra(EXTRA_URL)
+        currentIndex = intent.getIntExtra(EXTRA_INDEX, 0)
         if (url.isNullOrBlank()) {
             Toast.makeText(this, "URL manquante", Toast.LENGTH_SHORT).show()
             finish()
@@ -62,7 +58,7 @@ class WebPlaybackActivity : FragmentActivity() {
                 allowFileAccess = false
                 loadWithOverviewMode = true
                 useWideViewPort = true
-                mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                 userAgentString =
                     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                     "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
@@ -75,18 +71,10 @@ class WebPlaybackActivity : FragmentActivity() {
                     view: WebView, request: WebResourceRequest
                 ): Boolean {
                     val target = request.url.toString()
-                    // Bloque l'ouverture de fenêtres externes / pubs qui veulent quitter
                     if (target.startsWith("intent:") || target.startsWith("market:") ||
                         target.contains("play.google.com") || target.startsWith("mailto:")
                     ) {
                         return true
-                    }
-                    // Reste sur la page actuelle pour les liens externes (anti-popup pub)
-                    if (!target.contains(request.url.host ?: "", ignoreCase = true) &&
-                        target != url
-                    ) {
-                        // laisse passer les ressources qui ne sont pas des navigations
-                        return false
                     }
                     return false
                 }
@@ -96,7 +84,61 @@ class WebPlaybackActivity : FragmentActivity() {
             requestFocus()
         }
         setContentView(webView)
+
+        if (urls.size > 1) {
+            Toast.makeText(
+                this,
+                "Maintiens RETOUR pour changer de source",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+
         webView.loadUrl(url)
+    }
+
+    // Intercepte BACK AVANT que la WebView ne le consomme (sinon elle l'utilise pour
+    // naviguer dans son historique). dispatchKeyEvent est appelé sur l'activité en
+    // premier dans la chaîne de dispatch.
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode != KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
+        return when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (event.repeatCount == 0) {
+                    longPressFired = false
+                    event.startTracking()
+                } else if (event.isLongPress) {
+                    if (urls.size > 1) {
+                        longPressFired = true
+                        showSourcePicker()
+                    }
+                }
+                true
+            }
+            KeyEvent.ACTION_UP -> {
+                if (longPressFired) {
+                    longPressFired = false
+                } else {
+                    finish()
+                }
+                true
+            }
+            else -> super.dispatchKeyEvent(event)
+        }
+    }
+
+    private fun showSourcePicker() {
+        AlertDialog.Builder(this, R.style.MovixDialog)
+            .setTitle("Changer de source")
+            .setSingleChoiceItems(labels.toTypedArray(), currentIndex) { dialog, which ->
+                dialog.dismiss()
+                if (which == currentIndex) return@setSingleChoiceItems
+                currentIndex = which
+                val newUrl = urls.getOrNull(which) ?: return@setSingleChoiceItems
+                webView.stopLoading()
+                webView.loadUrl(newUrl)
+            }
+            .setNegativeButton("Annuler", null)
+            .show()
     }
 
     override fun onPause() {
@@ -119,12 +161,11 @@ class WebPlaybackActivity : FragmentActivity() {
         super.onDestroy()
     }
 
-    override fun onBackPressed() {
-        if (webView.canGoBack()) webView.goBack() else super.onBackPressed()
-    }
-
     companion object {
         const val EXTRA_URL = "extra_url"
         const val EXTRA_TITLE = "extra_title"
+        const val EXTRA_URLS = "extra_urls"
+        const val EXTRA_LABELS = "extra_labels"
+        const val EXTRA_INDEX = "extra_index"
     }
 }

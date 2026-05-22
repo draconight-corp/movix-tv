@@ -25,6 +25,7 @@ import com.example.movix.data.MovixLink
 import com.example.movix.data.MovixSourcesResponse
 import com.example.movix.data.Repository
 import com.example.movix.data.TmdbItem
+import com.example.movix.history.WatchHistory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -122,7 +123,14 @@ class VideoDetailsFragment : DetailsSupportFragment() {
         }
 
         val actionAdapter = ArrayObjectAdapter()
-        actionAdapter.add(Action(ACTION_WATCH, getString(R.string.watch_now)))
+        val history = WatchHistory.forMovie(requireContext().applicationContext, m.tmdbId, m.isTv)
+        if (m.isTv && history?.lastSeason != null && history.lastEpisode != null) {
+            val tag = "S${history.lastSeason.toString().padStart(2, '0')}E${history.lastEpisode.toString().padStart(2, '0')}"
+            actionAdapter.add(Action(ACTION_RESUME, "Reprendre $tag"))
+            actionAdapter.add(Action(ACTION_WATCH, "Choisir un autre épisode"))
+        } else {
+            actionAdapter.add(Action(ACTION_WATCH, getString(R.string.watch_now)))
+        }
         row.actionsAdapter = actionAdapter
 
         rowsAdapter.add(row)
@@ -133,7 +141,10 @@ class VideoDetailsFragment : DetailsSupportFragment() {
         detailsPresenter.backgroundColor =
             ContextCompat.getColor(requireActivity(), R.color.movix_dark)
         detailsPresenter.onActionClickedListener = OnActionClickedListener { action ->
-            if (action.id == ACTION_WATCH) onWatchClicked()
+            when (action.id) {
+                ACTION_WATCH -> onWatchClicked()
+                ACTION_RESUME -> onResumeClicked()
+            }
         }
         presenterSelector.addClassPresenter(DetailsOverviewRow::class.java, detailsPresenter)
     }
@@ -163,6 +174,13 @@ class VideoDetailsFragment : DetailsSupportFragment() {
     private fun onWatchClicked() {
         val m = movie ?: return
         if (m.isTv) chooseSeasonAndEpisode(m) else resolveAndPlay(m, null, null)
+    }
+
+    private fun onResumeClicked() {
+        val m = movie ?: return
+        val h = WatchHistory.forMovie(requireContext().applicationContext, m.tmdbId, m.isTv) ?: return
+        val s = h.lastSeason; val e = h.lastEpisode
+        if (s != null && e != null) resolveAndPlay(m, s, e) else onWatchClicked()
     }
 
     private fun chooseSeasonAndEpisode(m: Movie) {
@@ -222,14 +240,16 @@ class VideoDetailsFragment : DetailsSupportFragment() {
                 Toast.makeText(requireContext(), R.string.no_sources, Toast.LENGTH_LONG).show()
                 return@launch
             }
+            // Enregistre dans l'historique dès qu'on a un truc à jouer
+            WatchHistory.record(requireContext().applicationContext, m, season, episode)
             if (links.size == 1) {
-                launchPlayer(m, links[0])
+                launchPlayer(m, links, 0)
                 return@launch
             }
             val labels = links.map { it.displayName() }.toTypedArray()
             AlertDialog.Builder(requireContext(), R.style.MovixDialog)
                 .setTitle(R.string.choose_source)
-                .setItems(labels) { _, idx -> launchPlayer(m, links[idx]) }
+                .setItems(labels) { _, idx -> launchPlayer(m, links, idx) }
                 .show()
         }
     }
@@ -258,18 +278,28 @@ class VideoDetailsFragment : DetailsSupportFragment() {
     private fun iframeLink(url: String): MovixLink =
         MovixLink(decodedUrl = url, quality = "Lecteur principal", language = "FR")
 
-    private fun launchPlayer(m: Movie, link: MovixLink) {
+    private fun launchPlayer(m: Movie, links: List<MovixLink>, selectedIdx: Int) {
+        val link = links.getOrNull(selectedIdx) ?: return
         val url = link.bestUrl() ?: return
+        val urls = ArrayList(links.mapNotNull { it.bestUrl() })
+        val labels = ArrayList(links.map { it.displayName() })
+
         val intent = if (isDirectStream(url)) {
             Intent(requireActivity(), PlaybackActivity::class.java).apply {
                 putExtra(PlaybackActivity.EXTRA_URL, url)
                 putExtra(PlaybackActivity.EXTRA_TITLE, m.title)
                 putExtra(PlaybackActivity.EXTRA_DESCRIPTION, m.description)
+                putStringArrayListExtra(PlaybackActivity.EXTRA_URLS, urls)
+                putStringArrayListExtra(PlaybackActivity.EXTRA_LABELS, labels)
+                putExtra(PlaybackActivity.EXTRA_INDEX, selectedIdx)
             }
         } else {
             Intent(requireActivity(), WebPlaybackActivity::class.java).apply {
                 putExtra(WebPlaybackActivity.EXTRA_URL, url)
                 putExtra(WebPlaybackActivity.EXTRA_TITLE, m.title)
+                putStringArrayListExtra(WebPlaybackActivity.EXTRA_URLS, urls)
+                putStringArrayListExtra(WebPlaybackActivity.EXTRA_LABELS, labels)
+                putExtra(WebPlaybackActivity.EXTRA_INDEX, selectedIdx)
             }
         }
         startActivity(intent)
@@ -290,6 +320,7 @@ class VideoDetailsFragment : DetailsSupportFragment() {
     companion object {
         private const val TAG = "VideoDetailsFragment"
         private const val ACTION_WATCH = 1L
+        private const val ACTION_RESUME = 2L
         private const val DETAIL_THUMB_WIDTH = 200
         private const val DETAIL_THUMB_HEIGHT = 300
     }
