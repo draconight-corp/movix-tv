@@ -60,6 +60,14 @@
             android:theme="@style/Theme.Movix" />
 
         <activity
+            android:name=".WebPlaybackActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:hardwareAccelerated="true"
+            android:theme="@style/Theme.Movix" />
+
+        <activity
             android:name=".BrowseErrorActivity"
             android:exported="false"
             android:screenOrientation="landscape" />

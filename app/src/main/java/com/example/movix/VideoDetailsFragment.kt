@@ -240,24 +240,46 @@ class VideoDetailsFragment : DetailsSupportFragment() {
         episode: Int?
     ): List<MovixLink> {
         if (sources == null) return emptyList()
-        val top = (sources.links ?: emptyList()) + (sources.players ?: emptyList())
-        if (season == null || episode == null) {
-            return top.filter { !it.bestUrl().isNullOrBlank() }
+
+        // Pour film : player_links + iframe_src en racine
+        // Pour épisode : current_episode.player_links + current_episode.iframe_src
+        val episodePayload = sources.currentEpisode
+        val links = if (season != null && episode != null && episodePayload != null) {
+            (episodePayload.playerLinks ?: emptyList()) +
+                    listOfNotNull(episodePayload.iframeSrc?.let { iframeLink(it) })
+        } else {
+            (sources.playerLinks ?: emptyList()) +
+                    listOfNotNull(sources.iframeSrc?.let { iframeLink(it) })
         }
-        val seasonNode = sources.seasons?.firstOrNull { it.number == season }
-        val episodeNode = seasonNode?.episodes?.firstOrNull { it.number == episode }
-        val sub = episodeNode?.allLinks().orEmpty()
-        return (sub + top).filter { !it.bestUrl().isNullOrBlank() }
+
+        return links.filter { !it.bestUrl().isNullOrBlank() }
     }
+
+    private fun iframeLink(url: String): MovixLink =
+        MovixLink(decodedUrl = url, quality = "Lecteur principal", language = "FR")
 
     private fun launchPlayer(m: Movie, link: MovixLink) {
         val url = link.bestUrl() ?: return
-        val intent = Intent(requireActivity(), PlaybackActivity::class.java).apply {
-            putExtra(PlaybackActivity.EXTRA_URL, url)
-            putExtra(PlaybackActivity.EXTRA_TITLE, m.title)
-            putExtra(PlaybackActivity.EXTRA_DESCRIPTION, m.description)
+        val intent = if (isDirectStream(url)) {
+            Intent(requireActivity(), PlaybackActivity::class.java).apply {
+                putExtra(PlaybackActivity.EXTRA_URL, url)
+                putExtra(PlaybackActivity.EXTRA_TITLE, m.title)
+                putExtra(PlaybackActivity.EXTRA_DESCRIPTION, m.description)
+            }
+        } else {
+            Intent(requireActivity(), WebPlaybackActivity::class.java).apply {
+                putExtra(WebPlaybackActivity.EXTRA_URL, url)
+                putExtra(WebPlaybackActivity.EXTRA_TITLE, m.title)
+            }
         }
         startActivity(intent)
+    }
+
+    private fun isDirectStream(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains(".m3u8") || lower.contains(".mpd") ||
+                lower.endsWith(".mp4") || lower.endsWith(".webm") ||
+                lower.endsWith(".mkv")
     }
 
     private fun dpToPx(context: Context, dp: Int): Int {

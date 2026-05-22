@@ -29,9 +29,11 @@ object ApiClient {
                 val req = chain.request().newBuilder()
                     .header(
                         "User-Agent",
-                        "MovixTV/1.0 (Android TV; Leanback) AppleWebKit/537.36"
+                        "Mozilla/5.0 (Linux; Android TV) AppleWebKit/537.36 (KHTML, like Gecko) MovixTV/1.0"
                     )
                     .header("Accept", "application/json, */*")
+                    .header("Origin", ApiConfig.MOVIX_SITE_ORIGIN)
+                    .header("Referer", "${ApiConfig.MOVIX_SITE_ORIGIN}/")
                     .build()
                 chain.proceed(req)
             }
