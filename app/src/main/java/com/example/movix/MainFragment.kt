@@ -101,6 +101,7 @@ class MainFragment : BrowseSupportFragment() {
             val infoAdapter = ArrayObjectAdapter(InfoItemPresenter())
             infoAdapter.add("Version installée : ${BuildConfig.VERSION_NAME}")
             infoAdapter.add("Vérifier les mises à jour")
+            infoAdapter.add("Serveur Movix : ${com.example.movix.config.MovixConfig.currentApiHost(requireContext())}")
             infoAdapter.add("Voir le dernier crash")
             rowsAdapter.add(ListRow(infoHeader, infoAdapter))
 
@@ -168,6 +169,9 @@ class MainFragment : BrowseSupportFragment() {
                 lifecycleScope.launch {
                     com.example.movix.update.UpdateManager.checkAndPrompt(requireActivity())
                 }
+            }
+            item.startsWith("Serveur") -> {
+                com.example.movix.config.SettingsDialog.show(requireContext(), lifecycleScope)
             }
             item.startsWith("Voir") -> {
                 val crash = MovixApp.consumeLastCrash(requireContext().applicationContext)

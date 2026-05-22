@@ -1,9 +1,8 @@
 package com.example.movix.data
 
 object ApiConfig {
-    // Backend public Movix.
-    const val MOVIX_BASE_URL = "https://api.movix.tax/"
-    const val MOVIX_SITE_ORIGIN = "https://movix.tax"
+    // Le backend Movix est résolu dynamiquement via MovixConfig + MirrorResolver.
+    // Voir com.example.movix.config.MovixConfig et MirrorResolver.
 
     // TMDB - utilisé pour le catalogue (popular, trending, détails).
     // Cette clé v3 publique est diffusée largement et est en lecture seule ;

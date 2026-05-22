@@ -5,6 +5,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import com.example.movix.config.MirrorResolver
 import com.example.movix.update.UpdateManager
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -37,6 +38,11 @@ class MainActivity : FragmentActivity() {
             "Movix TV v${BuildConfig.VERSION_NAME} chargée",
             Toast.LENGTH_LONG
         ).show()
+
+        // Auto-détection du domaine Movix actif (silencieuse, en arrière-plan)
+        lifecycleScope.launch {
+            MirrorResolver.resolve(applicationContext)
+        }
 
         lifecycleScope.launch {
             delay(2000)

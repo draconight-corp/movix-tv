@@ -15,6 +15,7 @@ class MovixApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         installCrashHandler()
     }
 
@@ -34,6 +35,9 @@ class MovixApp : Application() {
     }
 
     companion object {
+        @Volatile lateinit var instance: MovixApp
+            private set
+
         private const val TAG = "MovixApp"
         private const val CRASH_FILE = "last_crash.txt"
 
