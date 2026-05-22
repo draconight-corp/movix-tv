@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">Movix TV</string>
+    <string name="browse_title">Movix</string>
+    <string name="related_movies">À voir aussi</string>
+    <string name="search">Rechercher</string>
+    <string name="loading">Chargement…</string>
+    <string name="error_generic">Une erreur est survenue</string>
+    <string name="retry">Réessayer</string>
+    <string name="watch_now">Regarder</string>
+    <string name="no_sources">Aucune source disponible pour ce titre</string>
+    <string name="choose_source">Choisir une source</string>
+    <string name="choose_episode">Choisir un épisode</string>
+    <string name="choose_season">Choisir une saison</string>
+    <string name="season_n">Saison %d</string>
+    <string name="episode_n">Épisode %d</string>
+    <string name="dismiss_error">Fermer</string>
+    <string name="error_fragment_message">Une erreur est survenue</string>
+</resources>

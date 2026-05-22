@@ -1,0 +1,10 @@
+<resources>
+    <color name="background_gradient_start">#000000</color>
+    <color name="background_gradient_end">#1a1a2e</color>
+    <color name="fastlane_background">#1a1a2e</color>
+    <color name="search_opaque">#e94560</color>
+    <color name="selected_background">#e94560</color>
+    <color name="default_background">#16213e</color>
+    <color name="movix_red">#e94560</color>
+    <color name="movix_dark">#0f0f1e</color>
+</resources>

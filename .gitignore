@@ -1,0 +1,31 @@
+# Android Studio / Gradle
+*.iml
+.gradle/
+.kotlin/
+/build
+**/build/
+/captures
+.externalNativeBuild
+.cxx/
+
+# Local config
+local.properties
+
+# IDE
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build outputs
+*.apk
+*.aab
+*.aar
+*.ap_
+*.dex
+
+# Keystores / secrets
+*.jks
+*.keystore
+google-services.json

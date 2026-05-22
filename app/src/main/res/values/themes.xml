@@ -1,0 +1,20 @@
+<resources>
+
+    <style name="Theme.Movix" parent="@style/Theme.Leanback">
+        <item name="android:windowBackground">@color/movix_dark</item>
+    </style>
+
+    <style name="Theme.Movix.Browse" parent="@style/Theme.Leanback.Browse">
+        <item name="android:windowBackground">@color/movix_dark</item>
+    </style>
+
+    <style name="Theme.Movix.Details" parent="@style/Theme.Leanback.Details">
+        <item name="android:windowBackground">@color/movix_dark</item>
+    </style>
+
+    <style name="MovixDialog" parent="@android:style/Theme.Material.Dialog.Alert">
+        <item name="android:colorBackground">@color/movix_dark</item>
+        <item name="android:textColorPrimary">#ffffff</item>
+        <item name="android:colorAccent">@color/movix_red</item>
+    </style>
+</resources>
