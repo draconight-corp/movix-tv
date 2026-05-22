@@ -61,4 +61,11 @@ object MovixConfig {
             .putLong(KEY_RESOLVED_AT, System.currentTimeMillis())
             .apply()
     }
+
+    private const val KEY_FILTER_DEAD = "filter_dead_links"
+    fun isDeadLinkFilterEnabled(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, 0).getBoolean(KEY_FILTER_DEAD, true)
+    fun setDeadLinkFilterEnabled(ctx: Context, enabled: Boolean) {
+        ctx.getSharedPreferences(PREFS, 0).edit().putBoolean(KEY_FILTER_DEAD, enabled).apply()
+    }
 }

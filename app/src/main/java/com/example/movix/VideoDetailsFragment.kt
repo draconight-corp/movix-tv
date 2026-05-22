@@ -21,9 +21,11 @@ import androidx.lifecycle.lifecycleScope
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.CustomTarget
 import com.bumptech.glide.request.transition.Transition
+import com.example.movix.config.MovixConfig
 import com.example.movix.data.MovixLink
 import com.example.movix.data.Repository
 import com.example.movix.data.TmdbItem
+import com.example.movix.health.LinkHealthChecker
 import com.example.movix.history.WatchHistory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -229,37 +231,41 @@ class VideoDetailsFragment : DetailsSupportFragment() {
     private fun resolveAndPlay(m: Movie, season: Int?, episode: Int?) {
         Toast.makeText(requireContext(), R.string.loading, Toast.LENGTH_SHORT).show()
         lifecycleScope.launch {
-            val links = runCatching {
+            val raw = runCatching {
                 withContext(Dispatchers.IO) {
                     Repository.aggregateAllSources(m.tmdbId, m.isTv, season, episode)
                 }
             }.getOrDefault(emptyList())
-            if (links.isEmpty()) {
+            if (raw.isEmpty()) {
                 Toast.makeText(requireContext(), R.string.no_sources, Toast.LENGTH_LONG).show()
                 return@launch
             }
+
+            val filterDead = MovixConfig.isDeadLinkFilterEnabled(requireContext().applicationContext)
+            val (links, deadCount) = if (filterDead && raw.size > 1) {
+                Toast.makeText(requireContext(), "Vérification de ${raw.size} sources…", Toast.LENGTH_SHORT).show()
+                val result = withContext(Dispatchers.IO) { LinkHealthChecker.classify(raw) }
+                // Fail-open si tout est marqué mort
+                val alives = if (result.alives.isEmpty()) raw else result.alives
+                alives to result.deads.size
+            } else {
+                raw to 0
+            }
+
             WatchHistory.record(requireContext().applicationContext, m, season, episode)
             if (links.size == 1) {
                 launchPlayer(m, links, 0)
                 return@launch
             }
-            // Groupage par catégorie, séparateurs visuels.
+
             val grouped = links.groupBy { it.category }
-            val labels = mutableListOf<String>()
-            val flat = mutableListOf<MovixLink>()
-            grouped.forEach { (category, items) ->
-                labels.add("── $category (${items.size}) ──")
-                flat.add(items.first()) // placeholder dummy, ne sera pas cliqué (titre non sélectionnable)
-                items.forEach {
-                    labels.add("  ${it.displayName()}")
-                    flat.add(it)
-                }
+            val title = buildString {
+                append("Sources (${links.size}) — ${grouped.size} catégorie(s)")
+                if (deadCount > 0) append(" • ${deadCount} mortes filtrées")
             }
-            // setItems ne supporte pas le mode "header non cliquable" facilement —
-            // on prend une approche plus simple : juste afficher labels avec préfixe de catégorie.
             val flatLabels = links.map { "[${it.category}]  ${it.displayName()}" }.toTypedArray()
             AlertDialog.Builder(requireContext(), R.style.MovixDialog)
-                .setTitle("Sources (${links.size}) — ${grouped.size} catégorie(s)")
+                .setTitle(title)
                 .setItems(flatLabels) { _, idx -> launchPlayer(m, links, idx) }
                 .show()
         }

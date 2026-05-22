@@ -61,6 +61,13 @@ object SettingsDialog {
             }
         }
 
+        val filterOn = MovixConfig.isDeadLinkFilterEnabled(ctx)
+        actions += "Filtre liens morts : ${if (filterOn) "ON" else "OFF"} (cliquer pour bascule)" to {
+            val newValue = !filterOn
+            MovixConfig.setDeadLinkFilterEnabled(ctx, newValue)
+            Toast.makeText(ctx, "Filtre liens morts : ${if (newValue) "activé" else "désactivé"}", Toast.LENGTH_SHORT).show()
+        }
+
         actions += "Fermer" to {}
 
         AlertDialog.Builder(ctx, R.style.MovixDialog)
