@@ -99,10 +99,50 @@ object AdBlocker {
               var a = e.target.closest && e.target.closest('a');
               if (a && a.target === '_blank') a.target = '_self';
             }, true);
-            // Tue les popunders qui changent document.location au clic
-            var origAssign = window.location.assign;
-            // (laisser la nav légitime fonctionner — on bloque que les patterns suspects côté webViewClient)
           } catch (e) {}
+        })();
+    """.trimIndent()
+
+    /**
+     * Tente de lancer la lecture sans intervention utilisateur :
+     *  - démute et appelle .play() sur tous les <video>
+     *  - clique tout bouton "play" évident (selectors les plus courants)
+     *  - retry à 0/1.5s/3s/5s pour les players qui se chargent en JS
+     */
+    val FORCE_PLAY_JS = """
+        (function() {
+          function tryPlay() {
+            var clicked = false;
+            try {
+              document.querySelectorAll('video').forEach(function(v){
+                try { v.muted = false; v.removeAttribute('muted'); v.play(); } catch(e){}
+              });
+            } catch(e){}
+            var selectors = [
+              '.vjs-big-play-button', '.jw-icon-display', '.jw-display-icon-display',
+              '.plyr__control--overlaid', '.play-button', '.play_button', '.btn-play',
+              'button.play', '.player-play', '.player_play', '.play-overlay',
+              '#play', '#play-button', '#playButton',
+              '[aria-label="Play"]', '[aria-label*="Play"]', '[aria-label*="Lire"]',
+              '[title="Play"]', '[title*="Play"]',
+              '.vjs-poster', '.video-overlay',
+              '[class*="play-btn"]', '[class*="PlayBtn"]', '[class*="play_btn"]'
+            ];
+            for (var i = 0; i < selectors.length; i++) {
+              try {
+                document.querySelectorAll(selectors[i]).forEach(function(el){
+                  if (el && el.offsetParent !== null) {
+                    try { el.click(); clicked = true; } catch(e){}
+                  }
+                });
+              } catch(e){}
+            }
+            return clicked;
+          }
+          tryPlay();
+          setTimeout(tryPlay, 1500);
+          setTimeout(tryPlay, 3000);
+          setTimeout(tryPlay, 5000);
         })();
     """.trimIndent()
 }

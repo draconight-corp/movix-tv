@@ -53,12 +53,30 @@ class PlaybackActivity : FragmentActivity() {
                 if (longPressFired) {
                     longPressFired = false
                 } else {
-                    finish()
+                    showQuitConfirmation()
                 }
                 true
             }
             else -> super.dispatchKeyEvent(event)
         }
+    }
+
+    private fun showQuitConfirmation() {
+        val items = if (urls.size > 1) {
+            arrayOf("Continuer la lecture", "Changer de source", "Quitter")
+        } else {
+            arrayOf("Continuer la lecture", "Quitter")
+        }
+        AlertDialog.Builder(this, R.style.MovixDialog)
+            .setTitle("Quitter la lecture ?")
+            .setItems(items) { _, idx ->
+                when {
+                    idx == 0 -> { /* dismiss */ }
+                    idx == 1 && urls.size > 1 -> showSourcePicker()
+                    else -> finish()
+                }
+            }
+            .show()
     }
 
     private fun showSourcePicker() {

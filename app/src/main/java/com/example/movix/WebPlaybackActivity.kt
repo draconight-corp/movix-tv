@@ -2,8 +2,12 @@ package com.example.movix
 
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.SystemClock
+import android.util.TypedValue
 import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.webkit.WebChromeClient
@@ -19,17 +23,29 @@ import com.example.movix.webfilter.AdBlocker
 
 class WebPlaybackActivity : FragmentActivity() {
 
+    private lateinit var root: FrameLayout
     private lateinit var webView: WebView
+    private lateinit var cursorView: View
+
     private val urls: List<String> by lazy { intent.getStringArrayListExtra(EXTRA_URLS) ?: emptyList() }
     private val labels: List<String> by lazy { intent.getStringArrayListExtra(EXTRA_LABELS) ?: emptyList() }
     private var currentIndex: Int = 0
-    private var longPressFired = false
+
+    private var backLongPressFired = false
+    private var okLongPressFired = false
+    private var cursorMode = false
+    private var cursorX = 0f
+    private var cursorY = 0f
+    private val cursorStepPx by lazy {
+        TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 32f, resources.displayMetrics)
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        @Suppress("DEPRECATION")
         window.decorView.systemUiVisibility = (
                 View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                         or View.SYSTEM_UI_FLAG_FULLSCREEN
@@ -46,111 +62,266 @@ class WebPlaybackActivity : FragmentActivity() {
             return
         }
 
-        webView = WebView(this).apply {
-            layoutParams = FrameLayout.LayoutParams(
+        webView = createWebView()
+        cursorView = createCursorView()
+
+        root = FrameLayout(this).apply {
+            addView(webView, FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
-            )
-            settings.apply {
-                javaScriptEnabled = true
-                domStorageEnabled = true
-                databaseEnabled = true
-                mediaPlaybackRequiresUserGesture = false
-                allowContentAccess = true
-                allowFileAccess = false
-                loadWithOverviewMode = true
-                useWideViewPort = true
-                mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                userAgentString =
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
-                    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-                setSupportMultipleWindows(false)
-                javaScriptCanOpenWindowsAutomatically = false
-            }
-            webChromeClient = object : WebChromeClient() {
-                // Refuse toute ouverture de nouvelle fenêtre (popunders).
-                override fun onCreateWindow(
-                    view: WebView, isDialog: Boolean,
-                    isUserGesture: Boolean, resultMsg: android.os.Message
-                ): Boolean = false
-            }
-            webViewClient = object : WebViewClient() {
-                override fun shouldInterceptRequest(
-                    view: WebView, request: WebResourceRequest
-                ): WebResourceResponse? {
-                    val u = request.url.toString()
-                    return if (AdBlocker.shouldBlock(u)) AdBlocker.emptyResponse() else null
-                }
-
-                override fun shouldOverrideUrlLoading(
-                    view: WebView, request: WebResourceRequest
-                ): Boolean {
-                    val target = request.url.toString()
-                    // Intents externes interdits
-                    if (target.startsWith("intent:") || target.startsWith("market:") ||
-                        target.contains("play.google.com") || target.startsWith("mailto:") ||
-                        target.startsWith("tel:") || target.startsWith("sms:")
-                    ) return true
-                    // Hosts dans la blocklist → bloque la navigation aussi
-                    if (AdBlocker.shouldBlock(target)) return true
-                    return false
-                }
-
-                override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
-                    super.onPageStarted(view, url, favicon)
-                    view.evaluateJavascript(AdBlocker.ANTI_POPUP_JS, null)
-                }
-
-                override fun onPageFinished(view: WebView, url: String?) {
-                    super.onPageFinished(view, url)
-                    view.evaluateJavascript(AdBlocker.ANTI_POPUP_JS, null)
-                }
-            }
-            isFocusable = true
-            isFocusableInTouchMode = true
-            requestFocus()
+            ))
+            addView(cursorView, FrameLayout.LayoutParams(
+                cursorStepPx.toInt() * 2,
+                cursorStepPx.toInt() * 2
+            ))
         }
-        setContentView(webView)
+        setContentView(root)
 
-        if (urls.size > 1) {
-            Toast.makeText(
-                this,
-                "Maintiens RETOUR pour changer de source",
-                Toast.LENGTH_LONG
-            ).show()
-        }
-
+        showFirstTimeHints()
         webView.loadUrl(url)
     }
 
-    // Intercepte BACK AVANT que la WebView ne le consomme (sinon elle l'utilise pour
-    // naviguer dans son historique). dispatchKeyEvent est appelé sur l'activité en
-    // premier dans la chaîne de dispatch.
+    private fun showFirstTimeHints() {
+        val hints = mutableListOf<String>()
+        if (urls.size > 1) hints += "Maintiens RETOUR pour changer de source"
+        hints += "Maintiens OK pour activer le curseur"
+        Toast.makeText(this, hints.joinToString(" • "), Toast.LENGTH_LONG).show()
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun createWebView(): WebView = WebView(this).apply {
+        settings.apply {
+            javaScriptEnabled = true
+            domStorageEnabled = true
+            @Suppress("DEPRECATION")
+            databaseEnabled = true
+            mediaPlaybackRequiresUserGesture = false
+            allowContentAccess = true
+            allowFileAccess = false
+            loadWithOverviewMode = true
+            useWideViewPort = true
+            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            userAgentString =
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+            setSupportMultipleWindows(false)
+            javaScriptCanOpenWindowsAutomatically = false
+        }
+        webChromeClient = object : WebChromeClient() {
+            override fun onCreateWindow(
+                view: WebView, isDialog: Boolean,
+                isUserGesture: Boolean, resultMsg: android.os.Message
+            ): Boolean = false
+        }
+        webViewClient = object : WebViewClient() {
+            override fun shouldInterceptRequest(
+                view: WebView, request: WebResourceRequest
+            ): WebResourceResponse? {
+                val u = request.url.toString()
+                return if (AdBlocker.shouldBlock(u)) AdBlocker.emptyResponse() else null
+            }
+            override fun shouldOverrideUrlLoading(
+                view: WebView, request: WebResourceRequest
+            ): Boolean {
+                val target = request.url.toString()
+                if (target.startsWith("intent:") || target.startsWith("market:") ||
+                    target.contains("play.google.com") || target.startsWith("mailto:") ||
+                    target.startsWith("tel:") || target.startsWith("sms:")) return true
+                if (AdBlocker.shouldBlock(target)) return true
+                return false
+            }
+            override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                view.evaluateJavascript(AdBlocker.ANTI_POPUP_JS, null)
+            }
+            override fun onPageFinished(view: WebView, url: String?) {
+                super.onPageFinished(view, url)
+                view.evaluateJavascript(AdBlocker.ANTI_POPUP_JS, null)
+                view.evaluateJavascript(AdBlocker.FORCE_PLAY_JS, null)
+            }
+        }
+        isFocusable = true
+        isFocusableInTouchMode = true
+        requestFocus()
+    }
+
+    private fun createCursorView(): View {
+        val v = View(this)
+        val ring = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(0x88FFEB3B.toInt())
+            setStroke(
+                TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 3f, resources.displayMetrics).toInt(),
+                0xFF000000.toInt()
+            )
+        }
+        v.background = ring
+        v.visibility = View.GONE
+        return v
+    }
+
+    // ── Key handling ─────────────────────────────────────────────────────────
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode != KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(event)
-        return when (event.action) {
-            KeyEvent.ACTION_DOWN -> {
-                if (event.repeatCount == 0) {
-                    longPressFired = false
-                    event.startTracking()
-                } else if (event.isLongPress) {
-                    if (urls.size > 1) {
-                        longPressFired = true
-                        showSourcePicker()
-                    }
-                }
-                true
-            }
-            KeyEvent.ACTION_UP -> {
-                if (longPressFired) {
-                    longPressFired = false
-                } else {
-                    finish()
-                }
-                true
-            }
+        return when (event.keyCode) {
+            KeyEvent.KEYCODE_BACK -> handleBack(event)
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER,
+            KeyEvent.KEYCODE_BUTTON_A,
+            KeyEvent.KEYCODE_BUTTON_SELECT -> handleOk(event)
+            KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_DPAD_UP,
+            KeyEvent.KEYCODE_DPAD_DOWN -> handleDpad(event)
             else -> super.dispatchKeyEvent(event)
         }
+    }
+
+    private fun handleBack(event: KeyEvent): Boolean {
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (event.repeatCount == 0) {
+                    backLongPressFired = false
+                    event.startTracking()
+                } else if (event.isLongPress && urls.size > 1) {
+                    backLongPressFired = true
+                    showSourcePicker()
+                }
+            }
+            KeyEvent.ACTION_UP -> {
+                if (backLongPressFired) {
+                    backLongPressFired = false
+                } else if (cursorMode) {
+                    setCursorMode(false)
+                } else {
+                    showQuitConfirmation()
+                }
+            }
+        }
+        return true
+    }
+
+    private fun handleOk(event: KeyEvent): Boolean {
+        when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (event.repeatCount == 0) {
+                    okLongPressFired = false
+                    event.startTracking()
+                } else if (event.isLongPress) {
+                    okLongPressFired = true
+                    setCursorMode(!cursorMode)
+                }
+            }
+            KeyEvent.ACTION_UP -> {
+                if (okLongPressFired) {
+                    okLongPressFired = false
+                    return true
+                }
+                if (cursorMode) {
+                    tapAtCursor()
+                } else {
+                    // Court OK : tente le clic via JS sur tout bouton play visible
+                    webView.evaluateJavascript(AdBlocker.FORCE_PLAY_JS, null)
+                    // Et envoie un tap au centre comme fallback
+                    tapAt(webView.width / 2f, webView.height / 2f)
+                }
+            }
+        }
+        return true
+    }
+
+    private fun handleDpad(event: KeyEvent): Boolean {
+        if (!cursorMode) return super.dispatchKeyEvent(event)
+        if (event.action != KeyEvent.ACTION_DOWN) return true
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT  -> cursorX -= cursorStepPx
+            KeyEvent.KEYCODE_DPAD_RIGHT -> cursorX += cursorStepPx
+            KeyEvent.KEYCODE_DPAD_UP    -> cursorY -= cursorStepPx
+            KeyEvent.KEYCODE_DPAD_DOWN  -> cursorY += cursorStepPx
+        }
+        clampCursor()
+        positionCursorView()
+        return true
+    }
+
+    private fun setCursorMode(on: Boolean) {
+        cursorMode = on
+        if (on) {
+            if (cursorX == 0f && cursorY == 0f) {
+                cursorX = root.width / 2f
+                cursorY = root.height / 2f
+            }
+            positionCursorView()
+            cursorView.visibility = View.VISIBLE
+            Toast.makeText(
+                this,
+                "Mode curseur ACTIVÉ — flèches = déplacer, OK = clic, RETOUR ou long-OK = quitter",
+                Toast.LENGTH_LONG
+            ).show()
+        } else {
+            cursorView.visibility = View.GONE
+            Toast.makeText(this, "Mode curseur désactivé", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun clampCursor() {
+        val size = cursorView.width.takeIf { it > 0 }?.toFloat() ?: (cursorStepPx * 2f)
+        val maxX = (root.width - size).coerceAtLeast(0f)
+        val maxY = (root.height - size).coerceAtLeast(0f)
+        cursorX = cursorX.coerceIn(0f, maxX)
+        cursorY = cursorY.coerceIn(0f, maxY)
+    }
+
+    private fun positionCursorView() {
+        cursorView.translationX = cursorX
+        cursorView.translationY = cursorY
+    }
+
+    /**
+     * Injecte un vrai MotionEvent (ACTION_DOWN + ACTION_UP) au centre du
+     * curseur, dans la WebView. La WebView dispatche ça au DOM comme un
+     * tap utilisateur — c'est ce qui satisfait l'exigence "user gesture"
+     * des players HTML5.
+     */
+    private fun tapAtCursor() {
+        val centerX = cursorX + cursorView.width / 2f
+        val centerY = cursorY + cursorView.height / 2f
+        tapAt(centerX, centerY)
+    }
+
+    private fun tapAt(x: Float, y: Float) {
+        val downTime = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(downTime, downTime, MotionEvent.ACTION_DOWN, x, y, 0)
+        val up = MotionEvent.obtain(downTime, downTime + 80, MotionEvent.ACTION_UP, x, y, 0)
+        try {
+            webView.dispatchTouchEvent(down)
+            webView.dispatchTouchEvent(up)
+        } finally {
+            down.recycle()
+            up.recycle()
+        }
+    }
+
+    // ── Dialogs ──────────────────────────────────────────────────────────────
+
+    private fun showQuitConfirmation() {
+        val items = if (urls.size > 1) {
+            arrayOf("Continuer la lecture", "Changer de source", "Quitter")
+        } else {
+            arrayOf("Continuer la lecture", "Quitter")
+        }
+        AlertDialog.Builder(this, R.style.MovixDialog)
+            .setTitle("Quitter la lecture ?")
+            .setItems(items) { _, idx ->
+                when {
+                    idx == 0 -> { /* dismiss */ }
+                    idx == 1 && urls.size > 1 -> showSourcePicker()
+                    else -> finish()
+                }
+            }
+            .setOnCancelListener { /* ne fait rien */ }
+            .show()
     }
 
     private fun showSourcePicker() {
@@ -167,6 +338,8 @@ class WebPlaybackActivity : FragmentActivity() {
             .setNegativeButton("Annuler", null)
             .show()
     }
+
+    // ── Lifecycle ────────────────────────────────────────────────────────────
 
     override fun onPause() {
         super.onPause()
