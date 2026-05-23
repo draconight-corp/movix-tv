@@ -61,4 +61,45 @@ interface TmdbApi {
         @Query("api_key") apiKey: String = ApiConfig.TMDB_API_KEY,
         @Query("language") language: String = ApiConfig.TMDB_LANGUAGE
     ): TmdbSeasonDetail
+
+    // ── Catalogue avancé : pagination + filtres par genre/année ──────────────
+
+    @GET("movie/popular")
+    suspend fun popularMoviesPage(
+        @Query("page") page: Int,
+        @Query("api_key") apiKey: String = ApiConfig.TMDB_API_KEY,
+        @Query("language") language: String = ApiConfig.TMDB_LANGUAGE
+    ): TmdbListResponse
+
+    @GET("tv/popular")
+    suspend fun popularTvPage(
+        @Query("page") page: Int,
+        @Query("api_key") apiKey: String = ApiConfig.TMDB_API_KEY,
+        @Query("language") language: String = ApiConfig.TMDB_LANGUAGE
+    ): TmdbListResponse
+
+    /**
+     * Découverte de films, filtrée par genre TMDB. Renvoie une page de résultats
+     * triée par popularité décroissante (ce que la plupart des UIs veulent).
+     */
+    @GET("discover/movie")
+    suspend fun discoverMovies(
+        @Query("with_genres") genres: String,
+        @Query("page") page: Int = 1,
+        @Query("sort_by") sortBy: String = "popularity.desc",
+        @Query("include_adult") includeAdult: Boolean = false,
+        @Query("vote_count.gte") minVotes: Int = 50,
+        @Query("api_key") apiKey: String = ApiConfig.TMDB_API_KEY,
+        @Query("language") language: String = ApiConfig.TMDB_LANGUAGE
+    ): TmdbListResponse
+
+    @GET("discover/tv")
+    suspend fun discoverTv(
+        @Query("with_genres") genres: String,
+        @Query("page") page: Int = 1,
+        @Query("sort_by") sortBy: String = "popularity.desc",
+        @Query("vote_count.gte") minVotes: Int = 50,
+        @Query("api_key") apiKey: String = ApiConfig.TMDB_API_KEY,
+        @Query("language") language: String = ApiConfig.TMDB_LANGUAGE
+    ): TmdbListResponse
 }

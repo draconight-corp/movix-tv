@@ -2,6 +2,7 @@ package com.example.movix
 
 import android.annotation.SuppressLint
 import android.app.AlertDialog
+import android.content.Intent
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.SystemClock
@@ -19,7 +20,12 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.lifecycleScope
+import com.example.movix.history.WatchHistory
 import com.example.movix.webfilter.AdBlocker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class WebPlaybackActivity : FragmentActivity() {
 
@@ -27,9 +33,18 @@ class WebPlaybackActivity : FragmentActivity() {
     private lateinit var webView: WebView
     private lateinit var cursorView: View
 
-    private val urls: List<String> by lazy { intent.getStringArrayListExtra(EXTRA_URLS) ?: emptyList() }
-    private val labels: List<String> by lazy { intent.getStringArrayListExtra(EXTRA_LABELS) ?: emptyList() }
+    private var urls: MutableList<String> = mutableListOf()
+    private var labels: MutableList<String> = mutableListOf()
     private var currentIndex: Int = 0
+
+    // Contexte série pour le bouton "Épisode suivant"
+    private var tmdbId: Long = 0
+    private var isTv: Boolean = false
+    private var currentSeason: Int = -1
+    private var currentEpisode: Int = -1
+    private var movieTitle: String? = null
+    private var posterUrl: String? = null
+    private var backdropUrl: String? = null
 
     private var backLongPressFired = false
     private var okLongPressFired = false
@@ -39,6 +54,8 @@ class WebPlaybackActivity : FragmentActivity() {
     private val cursorStepPx by lazy {
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 32f, resources.displayMetrics)
     }
+
+    private val isEpisode: Boolean get() = isTv && currentSeason >= 0 && currentEpisode >= 0
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -55,7 +72,17 @@ class WebPlaybackActivity : FragmentActivity() {
                 )
 
         val url = intent.getStringExtra(EXTRA_URL)
+        urls = (intent.getStringArrayListExtra(EXTRA_URLS) ?: arrayListOf()).toMutableList()
+        labels = (intent.getStringArrayListExtra(EXTRA_LABELS) ?: arrayListOf()).toMutableList()
         currentIndex = intent.getIntExtra(EXTRA_INDEX, 0)
+        tmdbId = intent.getLongExtra(EXTRA_TMDB_ID, 0)
+        isTv = intent.getBooleanExtra(EXTRA_IS_TV, false)
+        currentSeason = intent.getIntExtra(EXTRA_SEASON, -1)
+        currentEpisode = intent.getIntExtra(EXTRA_EPISODE, -1)
+        movieTitle = intent.getStringExtra(EXTRA_TITLE)
+        posterUrl = intent.getStringExtra(EXTRA_POSTER)
+        backdropUrl = intent.getStringExtra(EXTRA_BACKDROP)
+
         if (url.isNullOrBlank()) {
             Toast.makeText(this, "URL manquante", Toast.LENGTH_SHORT).show()
             finish()
@@ -306,18 +333,21 @@ class WebPlaybackActivity : FragmentActivity() {
     // ── Dialogs ──────────────────────────────────────────────────────────────
 
     private fun showQuitConfirmation() {
-        val items = if (urls.size > 1) {
-            arrayOf("Continuer la lecture", "Changer de source", "Quitter")
-        } else {
-            arrayOf("Continuer la lecture", "Quitter")
-        }
+        val items = buildList {
+            add("Continuer la lecture")
+            if (isEpisode) add("Épisode suivant")
+            if (urls.size > 1) add("Changer de source")
+            add("Quitter")
+        }.toTypedArray()
+
         AlertDialog.Builder(this, R.style.MovixDialog)
             .setTitle("Quitter la lecture ?")
             .setItems(items) { _, idx ->
-                when {
-                    idx == 0 -> { /* dismiss */ }
-                    idx == 1 && urls.size > 1 -> showSourcePicker()
-                    else -> finish()
+                when (items[idx]) {
+                    "Continuer la lecture" -> { /* dismiss */ }
+                    "Épisode suivant" -> playNextEpisode()
+                    "Changer de source" -> showSourcePicker()
+                    "Quitter" -> finish()
                 }
             }
             .setOnCancelListener { /* ne fait rien */ }
@@ -337,6 +367,74 @@ class WebPlaybackActivity : FragmentActivity() {
             }
             .setNegativeButton("Annuler", null)
             .show()
+    }
+
+    private fun playNextEpisode() {
+        if (!isEpisode) return
+        Toast.makeText(this, "Recherche de l'épisode suivant…", Toast.LENGTH_SHORT).show()
+        lifecycleScope.launch {
+            val next = withContext(Dispatchers.IO) {
+                PlaybackNavigator.resolveNext(applicationContext, tmdbId, currentSeason, currentEpisode)
+            }
+            if (next == null) {
+                Toast.makeText(this@WebPlaybackActivity, "Pas d'épisode suivant disponible", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            // Met à jour l'état + historique, puis remplace l'intent et relance
+            currentSeason = next.season
+            currentEpisode = next.episode
+            val newUrls = ArrayList(next.links.map { it.bestUrl() })
+            val newLabels = ArrayList(next.links.map { "[${it.category}] ${it.displayName()}" })
+            urls = newUrls.toMutableList()
+            labels = newLabels.toMutableList()
+            currentIndex = 0
+
+            // Enregistre dans l'historique (le titre série reste le même)
+            val fakeMovie = Movie(
+                id = tmdbId,
+                tmdbId = tmdbId,
+                isTv = true,
+                title = movieTitle,
+                cardImageUrl = posterUrl,
+                backgroundImageUrl = backdropUrl
+            )
+            WatchHistory.record(applicationContext, fakeMovie, next.season, next.episode)
+
+            val firstUrl = newUrls.firstOrNull() ?: return@launch
+            // Si la nouvelle source n'est pas un embed HTML, on bascule sur PlaybackActivity
+            if (isDirectStream(firstUrl)) {
+                val intent = Intent(this@WebPlaybackActivity, PlaybackActivity::class.java).apply {
+                    putExtra(PlaybackActivity.EXTRA_URL, firstUrl)
+                    putExtra(PlaybackActivity.EXTRA_TITLE, movieTitle)
+                    putStringArrayListExtra(PlaybackActivity.EXTRA_URLS, newUrls)
+                    putStringArrayListExtra(PlaybackActivity.EXTRA_LABELS, newLabels)
+                    putExtra(PlaybackActivity.EXTRA_INDEX, 0)
+                    putExtra(PlaybackActivity.EXTRA_TMDB_ID, tmdbId)
+                    putExtra(PlaybackActivity.EXTRA_IS_TV, true)
+                    putExtra(PlaybackActivity.EXTRA_SEASON, next.season)
+                    putExtra(PlaybackActivity.EXTRA_EPISODE, next.episode)
+                    putExtra(PlaybackActivity.EXTRA_POSTER, posterUrl)
+                    putExtra(PlaybackActivity.EXTRA_BACKDROP, backdropUrl)
+                }
+                startActivity(intent)
+                finish()
+            } else {
+                Toast.makeText(
+                    this@WebPlaybackActivity,
+                    "S${"%02d".format(next.season)}E${"%02d".format(next.episode)} — chargement…",
+                    Toast.LENGTH_SHORT
+                ).show()
+                webView.stopLoading()
+                webView.loadUrl(firstUrl)
+            }
+        }
+    }
+
+    private fun isDirectStream(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains(".m3u8") || lower.contains(".mpd") ||
+                lower.endsWith(".mp4") || lower.endsWith(".webm") ||
+                lower.endsWith(".mkv")
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────
@@ -367,5 +465,11 @@ class WebPlaybackActivity : FragmentActivity() {
         const val EXTRA_URLS = "extra_urls"
         const val EXTRA_LABELS = "extra_labels"
         const val EXTRA_INDEX = "extra_index"
+        const val EXTRA_TMDB_ID = "extra_tmdb_id"
+        const val EXTRA_IS_TV = "extra_is_tv"
+        const val EXTRA_SEASON = "extra_season"
+        const val EXTRA_EPISODE = "extra_episode"
+        const val EXTRA_POSTER = "extra_poster"
+        const val EXTRA_BACKDROP = "extra_backdrop"
     }
 }

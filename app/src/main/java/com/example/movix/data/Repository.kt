@@ -5,20 +5,90 @@ import kotlinx.coroutines.coroutineScope
 
 object Repository {
 
-    suspend fun rows(): List<Pair<String, List<TmdbItem>>> {
-        val popularMovies = runCatching { ApiClient.tmdb.popularMovies() }.getOrNull()
-        val trendingWeek = runCatching { ApiClient.tmdb.trendingWeek() }.getOrNull()
-        val nowPlaying = runCatching { ApiClient.tmdb.nowPlaying() }.getOrNull()
-        val popularTv = runCatching { ApiClient.tmdb.popularTv() }.getOrNull()
-        val topRated = runCatching { ApiClient.tmdb.topRatedMovies() }.getOrNull()
+    /**
+     * Genres TMDB exposés en rangées dédiées sur l'écran principal.
+     * IDs : https://developer.themoviedb.org/reference/genre-movie-list
+     */
+    private val MOVIE_GENRES: List<Pair<String, Int>> = listOf(
+        "Action" to 28,
+        "Comédie" to 35,
+        "Drame" to 18,
+        "Aventure" to 12,
+        "Animation" to 16,
+        "Science-fiction" to 878,
+        "Horreur" to 27,
+        "Thriller" to 53,
+        "Romance" to 10749,
+        "Famille" to 10751,
+        "Fantastique" to 14,
+        "Policier" to 80,
+        "Documentaire" to 99,
+        "Mystère" to 9648,
+        "Guerre" to 10752,
+        "Western" to 37,
+        "Histoire" to 36,
+        "Musique" to 10402
+    )
 
-        return listOf(
-            "Tendances de la semaine" to (trendingWeek?.results.orEmpty()),
-            "Films populaires" to (popularMovies?.results.orEmpty()),
-            "Au cinéma" to (nowPlaying?.results.orEmpty()),
-            "Séries populaires" to (popularTv?.results.orEmpty()),
-            "Mieux notés" to (topRated?.results.orEmpty()),
-        ).filter { it.second.isNotEmpty() }
+    private val TV_GENRES: List<Pair<String, Int>> = listOf(
+        "Séries Drame" to 18,
+        "Séries Comédie" to 35,
+        "Séries Action & Aventure" to 10759,
+        "Séries Science-fiction & Fantastique" to 10765,
+        "Séries Crime" to 80,
+        "Séries Animation" to 16
+    )
+
+    suspend fun rows(): List<Pair<String, List<TmdbItem>>> = coroutineScope {
+        // ── Rangées "classiques" (multi-pages pour avoir plus de films) ──
+        val popularMoviesD = async { fetchPages(3) { ApiClient.tmdb.popularMoviesPage(it) } }
+        val popularTvD     = async { fetchPages(2) { ApiClient.tmdb.popularTvPage(it) } }
+        val trendingWeekD  = async { runCatching { ApiClient.tmdb.trendingWeek() }.getOrNull()?.results.orEmpty() }
+        val nowPlayingD    = async { runCatching { ApiClient.tmdb.nowPlaying() }.getOrNull()?.results.orEmpty() }
+        val topRatedD      = async { runCatching { ApiClient.tmdb.topRatedMovies() }.getOrNull()?.results.orEmpty() }
+
+        // ── Rangées par catégorie (en parallèle, 1 page par genre) ──
+        val movieGenreDeferreds = MOVIE_GENRES.map { (label, id) ->
+            label to async {
+                runCatching {
+                    ApiClient.tmdb.discoverMovies(genres = id.toString()).results
+                }.getOrDefault(emptyList())
+            }
+        }
+        val tvGenreDeferreds = TV_GENRES.map { (label, id) ->
+            label to async {
+                runCatching {
+                    ApiClient.tmdb.discoverTv(genres = id.toString()).results
+                }.getOrDefault(emptyList())
+            }
+        }
+
+        val baseRows = listOf(
+            "Tendances de la semaine" to trendingWeekD.await(),
+            "Films populaires"        to popularMoviesD.await(),
+            "Au cinéma"               to nowPlayingD.await(),
+            "Séries populaires"       to popularTvD.await(),
+            "Mieux notés"             to topRatedD.await()
+        )
+        val movieGenreRows = movieGenreDeferreds.map { (label, def) -> label to def.await() }
+        val tvGenreRows = tvGenreDeferreds.map { (label, def) -> label to def.await() }
+
+        (baseRows + movieGenreRows + tvGenreRows).filter { it.second.isNotEmpty() }
+    }
+
+    /**
+     * Récupère N pages d'un endpoint TMDB en parallèle puis dédoublonne par id.
+     * Tolère les échecs partiels.
+     */
+    private suspend fun fetchPages(
+        pages: Int,
+        loader: suspend (page: Int) -> TmdbListResponse
+    ): List<TmdbItem> = coroutineScope {
+        val deferreds = (1..pages).map { p ->
+            async { runCatching { loader(p) }.getOrNull()?.results.orEmpty() }
+        }
+        val seen = mutableSetOf<Long>()
+        deferreds.flatMap { it.await() }.filter { seen.add(it.id) }
     }
 
     suspend fun details(item: TmdbItem): TmdbItem = runCatching {
@@ -100,7 +170,30 @@ object Repository {
         all += parseCpasmal(cpasmalDeferred.await())
         all += parseWiflix(wiflixDeferred.await())
         all += parseFstream(fstreamDeferred.await())
-        all
+        all.sortedWith(preferredOrder)
+    }
+
+    /**
+     * Ordonne les sources pour privilégier d'abord Viper (Cpasmal), puis les
+     * hôtes voe / uqload, puis le reste. Stable à l'intérieur de chaque bucket.
+     */
+    private val preferredOrder: Comparator<MovixLink> = Comparator { a, b ->
+        priorityOf(a).compareTo(priorityOf(b))
+    }
+
+    private fun priorityOf(link: MovixLink): Int {
+        val cat = link.category.lowercase()
+        val host = (link.host ?: "").lowercase()
+        val url = link.url.lowercase()
+        // 0 = Viper (Cpasmal) — la source la plus fiable historiquement
+        if (cat.contains("viper") || cat.contains("cpasmal")) return 0
+        // 1 = hôtes VOE / UQLOAD quelle que soit la catégorie d'origine
+        if ("voe" in host || "voe.sx" in url || "voe-" in url) return 1
+        if ("uqload" in host || "uqload" in url) return 1
+        // 2 = autres hôtes populaires (vidmoly, doodstream, filemoon)
+        if ("vidmoly" in host || "doodstream" in host || "filemoon" in host) return 2
+        // 3 = reste
+        return 3
     }
 
     private fun parseMovix1(

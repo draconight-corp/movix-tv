@@ -216,15 +216,36 @@ class VideoDetailsFragment : DetailsSupportFragment() {
                 Toast.makeText(requireContext(), R.string.no_sources, Toast.LENGTH_SHORT).show()
                 return@launch
             }
-            val labels = episodes.map {
-                "E${it.episodeNumber.toString().padStart(2, '0')} • ${it.name ?: ""}"
+            val lastWatched = WatchHistory.forMovie(requireContext().applicationContext, m.tmdbId, true)
+            val lastWatchedEp = lastWatched?.takeIf { it.lastSeason == season }?.lastEpisode
+            var preselectedIdx = -1
+            val labels = episodes.mapIndexed { i, ep ->
+                val tag = "E${ep.episodeNumber.toString().padStart(2, '0')}"
+                val name = ep.name ?: ""
+                if (ep.episodeNumber == lastWatchedEp) {
+                    preselectedIdx = i
+                    "▶ $tag • $name   (dernier vu)"
+                } else {
+                    "$tag • $name"
+                }
             }.toTypedArray()
-            AlertDialog.Builder(requireContext(), R.style.MovixDialog)
-                .setTitle(R.string.choose_episode)
-                .setItems(labels) { _, idx ->
+            val title = if (lastWatchedEp != null) {
+                getString(R.string.choose_episode) + "  •  dernier vu : E${lastWatchedEp.toString().padStart(2, '0')}"
+            } else {
+                getString(R.string.choose_episode)
+            }
+            val builder = AlertDialog.Builder(requireContext(), R.style.MovixDialog).setTitle(title)
+            if (preselectedIdx >= 0) {
+                builder.setSingleChoiceItems(labels, preselectedIdx) { dialog, idx ->
+                    dialog.dismiss()
                     resolveAndPlay(m, season, episodes[idx].episodeNumber)
                 }
-                .show()
+            } else {
+                builder.setItems(labels) { _, idx ->
+                    resolveAndPlay(m, season, episodes[idx].episodeNumber)
+                }
+            }
+            builder.show()
         }
     }
 
@@ -254,7 +275,7 @@ class VideoDetailsFragment : DetailsSupportFragment() {
 
             WatchHistory.record(requireContext().applicationContext, m, season, episode)
             if (links.size == 1) {
-                launchPlayer(m, links, 0)
+                launchPlayer(m, links, 0, season, episode)
                 return@launch
             }
 
@@ -266,13 +287,19 @@ class VideoDetailsFragment : DetailsSupportFragment() {
             val flatLabels = links.map { "[${it.category}]  ${it.displayName()}" }.toTypedArray()
             AlertDialog.Builder(requireContext(), R.style.MovixDialog)
                 .setTitle(title)
-                .setItems(flatLabels) { _, idx -> launchPlayer(m, links, idx) }
+                .setItems(flatLabels) { _, idx -> launchPlayer(m, links, idx, season, episode) }
                 .show()
         }
     }
 
 
-    private fun launchPlayer(m: Movie, links: List<MovixLink>, selectedIdx: Int) {
+    private fun launchPlayer(
+        m: Movie,
+        links: List<MovixLink>,
+        selectedIdx: Int,
+        season: Int?,
+        episode: Int?
+    ) {
         val link = links.getOrNull(selectedIdx) ?: return
         val url = link.bestUrl()
         val urls = ArrayList(links.map { it.bestUrl() })
@@ -286,6 +313,12 @@ class VideoDetailsFragment : DetailsSupportFragment() {
                 putStringArrayListExtra(PlaybackActivity.EXTRA_URLS, urls)
                 putStringArrayListExtra(PlaybackActivity.EXTRA_LABELS, labels)
                 putExtra(PlaybackActivity.EXTRA_INDEX, selectedIdx)
+                putExtra(PlaybackActivity.EXTRA_TMDB_ID, m.tmdbId)
+                putExtra(PlaybackActivity.EXTRA_IS_TV, m.isTv)
+                if (season != null) putExtra(PlaybackActivity.EXTRA_SEASON, season)
+                if (episode != null) putExtra(PlaybackActivity.EXTRA_EPISODE, episode)
+                putExtra(PlaybackActivity.EXTRA_POSTER, m.cardImageUrl)
+                putExtra(PlaybackActivity.EXTRA_BACKDROP, m.backgroundImageUrl)
             }
         } else {
             Intent(requireActivity(), WebPlaybackActivity::class.java).apply {
@@ -294,6 +327,12 @@ class VideoDetailsFragment : DetailsSupportFragment() {
                 putStringArrayListExtra(WebPlaybackActivity.EXTRA_URLS, urls)
                 putStringArrayListExtra(WebPlaybackActivity.EXTRA_LABELS, labels)
                 putExtra(WebPlaybackActivity.EXTRA_INDEX, selectedIdx)
+                putExtra(WebPlaybackActivity.EXTRA_TMDB_ID, m.tmdbId)
+                putExtra(WebPlaybackActivity.EXTRA_IS_TV, m.isTv)
+                if (season != null) putExtra(WebPlaybackActivity.EXTRA_SEASON, season)
+                if (episode != null) putExtra(WebPlaybackActivity.EXTRA_EPISODE, episode)
+                putExtra(WebPlaybackActivity.EXTRA_POSTER, m.cardImageUrl)
+                putExtra(WebPlaybackActivity.EXTRA_BACKDROP, m.backgroundImageUrl)
             }
         }
         startActivity(intent)
