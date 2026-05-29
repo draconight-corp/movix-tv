@@ -260,13 +260,79 @@ object Repository {
                 if (!isTv) ApiClient.movix.fstreamMovie(tmdbId) else null
             }.getOrNull()
         }
+        val customMovieDeferred = async {
+            runCatching {
+                if (!isTv) ApiClient.movix.customLinksMovie(tmdbId) else null
+            }.getOrNull()
+        }
+        val customTvDeferred = async {
+            runCatching {
+                if (isTv) ApiClient.movix.customLinksTv(tmdbId) else null
+            }.getOrNull()
+        }
 
         val all = mutableListOf<MovixLink>()
         all += parseMovix1(movix1Deferred.await(), season, episode)
         all += parseCpasmal(cpasmalDeferred.await())
         all += parseWiflix(wiflixDeferred.await())
         all += parseFstream(fstreamDeferred.await())
+        all += parseCustomMovieLinks(customMovieDeferred.await())
+        all += parseCustomTvLinks(customTvDeferred.await(), season, episode)
         all.sortedWith(preferredOrder)
+    }
+
+    /**
+     * Détecte si une URL matche un host SeekStreaming connu (les patterns
+     * viennent de hosterRegistry.ts côté MovixOpenSource).
+     */
+    private fun isSeekStreaming(url: String): Boolean {
+        val u = url.lowercase()
+        return u.contains("embedseek") || u.contains("embed4me") || u.contains("seekstreaming")
+    }
+
+    /**
+     * Numérote les liens custom-links pour matcher l'affichage du site Movix :
+     * les URLs SeekStreaming sont labellisées "SeekStreaming 1..N", les autres
+     * conservent leur host comme nom.
+     */
+    private fun numberCustomLinks(urls: List<String>): List<MovixLink> {
+        var seekIdx = 0
+        return urls.mapNotNull { raw ->
+            val url = raw.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            if (isSeekStreaming(url)) {
+                seekIdx += 1
+                MovixLink(
+                    url = url,
+                    host = "SeekStreaming $seekIdx",
+                    language = "FR",
+                    category = "SeekStreaming"
+                )
+            } else {
+                MovixLink(
+                    url = url,
+                    host = hostOf(url),
+                    language = "FR",
+                    category = "Custom links"
+                )
+            }
+        }
+    }
+
+    private fun parseCustomMovieLinks(resp: MovixCustomLinksMovieResponse?): List<MovixLink> {
+        val urls = resp?.data?.links.orEmpty()
+        return numberCustomLinks(urls)
+    }
+
+    private fun parseCustomTvLinks(
+        resp: MovixCustomLinksTvResponse?,
+        season: Int?,
+        episode: Int?
+    ): List<MovixLink> {
+        if (resp?.data == null || season == null || episode == null) return emptyList()
+        val ep = resp.data.firstOrNull {
+            it.seasonNumber == season && it.episodeNumber == episode
+        } ?: return emptyList()
+        return numberCustomLinks(ep.links.orEmpty())
     }
 
     /**

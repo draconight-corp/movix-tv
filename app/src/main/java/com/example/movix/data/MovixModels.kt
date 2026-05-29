@@ -152,6 +152,36 @@ data class MovixEpisodeStub(
     val title: String? = null
 )
 
+// Custom links (Firebase) : sources additionnelles dont SeekStreaming.
+// Films : {success, type:"movie", data:{id, links:[url, ...]}}
+@JsonClass(generateAdapter = true)
+data class MovixCustomLinksMovieResponse(
+    val success: Boolean? = null,
+    val type: String? = null,
+    val data: MovixCustomLinksMovieData? = null
+)
+@JsonClass(generateAdapter = true)
+data class MovixCustomLinksMovieData(
+    val id: String? = null,
+    val links: List<String>? = null
+)
+
+// Séries : {success, type:"tv", data:[{id, series_id, season_number, episode_number, links:[]}, ...]}
+@JsonClass(generateAdapter = true)
+data class MovixCustomLinksTvResponse(
+    val success: Boolean? = null,
+    val type: String? = null,
+    val data: List<MovixCustomLinksTvEpisode>? = null
+)
+@JsonClass(generateAdapter = true)
+data class MovixCustomLinksTvEpisode(
+    val id: Long? = null,
+    @Json(name = "series_id") val seriesId: String? = null,
+    @Json(name = "season_number") val seasonNumber: Int? = null,
+    @Json(name = "episode_number") val episodeNumber: Int? = null,
+    val links: List<String>? = null
+)
+
 @JsonClass(generateAdapter = true)
 data class MovixSearchResponse(
     val results: List<MovixSearchItem> = emptyList(),

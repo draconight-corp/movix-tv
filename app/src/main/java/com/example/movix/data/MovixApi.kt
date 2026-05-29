@@ -41,4 +41,13 @@ interface MovixApi {
     // ─── FStream ────────────────────────────────────────────────────────────
     @GET("api/fstream/movie/{id}")
     suspend fun fstreamMovie(@Path("id") tmdbId: Long): FstreamResponse
+
+    // ─── Custom links (Firebase) — d'où viennent les sources SeekStreaming ──
+    // Pas de path saison/épisode côté TV : l'endpoint renvoie tous les épisodes
+    // d'un coup, on filtre côté client.
+    @GET("api/links/movie/{id}")
+    suspend fun customLinksMovie(@Path("id") tmdbId: Long): MovixCustomLinksMovieResponse
+
+    @GET("api/links/tv/{id}")
+    suspend fun customLinksTv(@Path("id") tmdbId: Long): MovixCustomLinksTvResponse
 }
