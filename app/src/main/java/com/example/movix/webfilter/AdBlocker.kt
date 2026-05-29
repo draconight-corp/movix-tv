@@ -194,6 +194,84 @@ object AdBlocker {
               }
             }, true);
 
+            // ── Tueur de pop-ups pub blancs (VOE et autres players) ────────
+            // VOE et certains players similaires affichent un gros carré
+            // blanc opaque au-dessus de la vidéo qui ne disparaît qu'au clic.
+            // On le détecte (background clair, taille importante, position
+            // fixed/absolute, z-index élevé), on tente un clic sur les
+            // boutons de fermeture connus, puis on synthétise un click sur
+            // l'élément lui-même, puis on le retire.
+            function isWhitishBg(s) {
+              var bg = (s && s.backgroundColor) || '';
+              // rgb(R,G,B) ou rgba(R,G,B,A) avec R,G,B >= 230 → blanc/quasi-blanc
+              var m = bg.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+              if (!m) return false;
+              return parseInt(m[1],10) >= 230 &&
+                     parseInt(m[2],10) >= 230 &&
+                     parseInt(m[3],10) >= 230;
+            }
+            function tryClickClose(n) {
+              var sels = [
+                '.close', '.btn-close', '.modal-close', '.popup-close', '.ad-close',
+                '[class*="close" i]', '[class*="dismiss" i]', '[class*="skip" i]',
+                '[id*="close" i]', '[id*="dismiss" i]', '[id*="skip" i]',
+                '[aria-label*="close" i]', '[aria-label*="fermer" i]',
+                '[aria-label*="dismiss" i]', '[aria-label*="skip" i]',
+                'button.close', 'button[title*="Close" i]', 'button[title*="Fermer" i]',
+                'span.close', 'a.close'
+              ];
+              var clicked = false;
+              for (var j = 0; j < sels.length; j++) {
+                try {
+                  var btns = n.querySelectorAll(sels[j]);
+                  for (var k = 0; k < btns.length; k++) {
+                    try { btns[k].click(); clicked = true; } catch(e){}
+                  }
+                } catch(e){}
+              }
+              return clicked;
+            }
+            function killWhitePopups() {
+              try {
+                var w = window.innerWidth, h = window.innerHeight;
+                var nodes = document.querySelectorAll('div, section, aside, iframe');
+                for (var i = 0; i < nodes.length; i++) {
+                  var n = nodes[i];
+                  try {
+                    var s = window.getComputedStyle(n);
+                    if (!s) continue;
+                    if (s.position !== 'fixed' && s.position !== 'absolute') continue;
+                    var r = n.getBoundingClientRect();
+                    // Carré pub typique : > 25% de viewport sur les 2 axes
+                    if (r.width < w * 0.25 || r.height < h * 0.25) continue;
+                    if (parseInt(s.zIndex || '0', 10) < 10) continue;
+                    if (!isWhitishBg(s)) continue;
+                    // Sécurité : ne pas tuer le conteneur du player légitime
+                    // (s'il contient un <video> ou un <iframe> de player connu).
+                    if (n.querySelector && n.querySelector('video')) continue;
+                    // Étape 1 : essayer un bouton de fermeture interne
+                    var closed = tryClickClose(n);
+                    // Étape 2 : synthétiser un click sur le popup (les
+                    // redirections vers domaines externes sont déjà bloquées
+                    // par les wrappers location/window.open au-dessus).
+                    if (!closed) {
+                      try {
+                        var ev = new MouseEvent('click', {
+                          bubbles: true, cancelable: true, view: window
+                        });
+                        n.dispatchEvent(ev);
+                      } catch(e){}
+                    }
+                    // Étape 3 : retirer le noeud après une courte pause pour
+                    // laisser le clic faire effet d'abord.
+                    (function(el){
+                      setTimeout(function(){ try { el.remove(); } catch(e){} }, 200);
+                    })(n);
+                  } catch(e){}
+                }
+              } catch(e){}
+            }
+
             // ── Tueur d'overlays plein-écran de clickjacking ───────────────
             // Beaucoup d'embeds collent un <div> ou <iframe> transparent par
             // dessus le player qui redirige au 1er clic. On les détecte
@@ -234,12 +312,16 @@ object AdBlocker {
                 }
               } catch(e){}
             }
-            killOverlays();
-            setTimeout(killOverlays, 1000);
-            setTimeout(killOverlays, 3000);
-            setTimeout(killOverlays, 6000);
+            function sweep() { killWhitePopups(); killOverlays(); }
+            sweep();
+            setTimeout(sweep, 800);
+            setTimeout(sweep, 2000);
+            setTimeout(sweep, 4000);
+            setTimeout(sweep, 8000);
+            // Boucle légère pour les pubs qui réapparaissent
+            setInterval(killWhitePopups, 2500);
             try {
-              new MutationObserver(function(){ killOverlays(); })
+              new MutationObserver(function(){ sweep(); })
                 .observe(document.documentElement, { childList: true, subtree: true });
             } catch(e){}
           } catch (e) {}

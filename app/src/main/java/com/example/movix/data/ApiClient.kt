@@ -28,7 +28,7 @@ object ApiClient {
         val req = chain.request()
         val host = req.url.host
         val isMovixApi = host.startsWith("api.movix.") ||
-                host == "api.movix.tax" || host == "api.movix.health"
+                host == "api.movix.cloud" || host == "api.movix.tax" || host == "api.movix.health"
         if (!isMovixApi) return@Interceptor chain.proceed(req)
 
         val current = MovixConfig.currentApiHost(MovixApp.instance)

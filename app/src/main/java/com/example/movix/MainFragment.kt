@@ -28,6 +28,8 @@ import androidx.lifecycle.lifecycleScope
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.CustomTarget
 import com.bumptech.glide.request.transition.Transition
+import com.example.movix.config.AppMode
+import com.example.movix.config.AppModeStore
 import com.example.movix.data.Repository
 import com.example.movix.history.WatchHistory
 import kotlinx.coroutines.launch
@@ -70,11 +72,17 @@ class MainFragment : BrowseSupportFragment() {
     }
 
     private fun setupUIElements() {
-        title = "${getString(R.string.browse_title)}  •  v${BuildConfig.VERSION_NAME}"
+        refreshTitle()
         headersState = HEADERS_ENABLED
         isHeadersTransitionOnBackEnabled = true
         brandColor = ContextCompat.getColor(requireActivity(), R.color.fastlane_background)
         searchAffordanceColor = ContextCompat.getColor(requireActivity(), R.color.search_opaque)
+    }
+
+    private fun refreshTitle() {
+        val mode = AppModeStore.current(requireContext().applicationContext)
+        val modeLabel = AppModeStore.label(mode)
+        title = "${getString(R.string.browse_title)}  •  $modeLabel  •  v${BuildConfig.VERSION_NAME}"
     }
 
     private fun setupAdapter() {
@@ -83,14 +91,22 @@ class MainFragment : BrowseSupportFragment() {
     }
 
     private fun loadRows() {
+        val mode = AppModeStore.current(requireContext().applicationContext)
+        refreshTitle()
         lifecycleScope.launch {
-            val rows = runCatching { Repository.rows() }.getOrDefault(emptyList())
+            val rows = runCatching { Repository.rows(mode) }.getOrDefault(emptyList())
             val cardPresenter = CardPresenter()
             rowsAdapter.clear()
 
-            // Row "Reprendre" en tête, si historique
-            val history = WatchHistory.all(requireContext().applicationContext)
+            // ── Rangée "Mode" en tout premier — bascule Films/Séries <-> Animé
             var rowIndex = 0L
+            val modeAdapter = ArrayObjectAdapter(ModeItemPresenter())
+            modeAdapter.add(ModeItem(AppMode.FILMS_SERIES, mode == AppMode.FILMS_SERIES))
+            modeAdapter.add(ModeItem(AppMode.ANIME, mode == AppMode.ANIME))
+            rowsAdapter.add(ListRow(HeaderItem(rowIndex++, "Mode"), modeAdapter))
+
+            // ── Reprendre (historique), filtré au mode courant ──────────────
+            val history = WatchHistory.all(requireContext().applicationContext)
             if (history.isNotEmpty()) {
                 val resumeAdapter = ArrayObjectAdapter(cardPresenter)
                 history.forEach { entry ->
@@ -167,6 +183,7 @@ class MainFragment : BrowseSupportFragment() {
             try {
                 when (item) {
                     is Movie -> openDetails(item)
+                    is ModeItem -> handleModeClick(item)
                     is String -> handleInfoAction(item)
                 }
             } catch (t: Throwable) {
@@ -178,6 +195,18 @@ class MainFragment : BrowseSupportFragment() {
                 ).show()
             }
         }
+    }
+
+    private fun handleModeClick(item: ModeItem) {
+        val ctx = requireContext().applicationContext
+        val current = AppModeStore.current(ctx)
+        if (item.mode == current) {
+            Toast.makeText(requireContext(), "Mode déjà actif : ${AppModeStore.label(current)}", Toast.LENGTH_SHORT).show()
+            return
+        }
+        AppModeStore.set(ctx, item.mode)
+        Toast.makeText(requireContext(), "Mode : ${AppModeStore.label(item.mode)} — rechargement…", Toast.LENGTH_SHORT).show()
+        loadRows()
     }
 
     private fun openDetails(movie: Movie) {
@@ -267,10 +296,38 @@ class MainFragment : BrowseSupportFragment() {
         override fun onUnbindViewHolder(viewHolder: ViewHolder) {}
     }
 
+    /** Item d'une rangée bascule de mode (Films & Séries / Animé). */
+    private data class ModeItem(val mode: AppMode, val isActive: Boolean)
+
+    private inner class ModeItemPresenter : Presenter() {
+        override fun onCreateViewHolder(parent: ViewGroup): ViewHolder {
+            val view = TextView(parent.context)
+            view.layoutParams = ViewGroup.LayoutParams(MODE_W, MODE_H)
+            view.isFocusable = true
+            view.isFocusableInTouchMode = true
+            view.gravity = Gravity.CENTER
+            view.setPadding(24, 24, 24, 24)
+            view.setTextColor(0xFFFFFFFF.toInt())
+            view.textSize = 18f
+            return ViewHolder(view)
+        }
+        override fun onBindViewHolder(viewHolder: ViewHolder, item: Any?) {
+            val mi = item as ModeItem
+            val tv = viewHolder.view as TextView
+            val prefix = if (mi.isActive) "▶ " else ""
+            tv.text = "$prefix${AppModeStore.label(mi.mode)}"
+            val bgColor = if (mi.isActive) 0xFF4CAF50.toInt() else 0xFF222222.toInt()
+            tv.setBackgroundColor(bgColor)
+        }
+        override fun onUnbindViewHolder(viewHolder: ViewHolder) {}
+    }
+
     companion object {
         private const val TAG = "MainFragment"
         private const val BACKGROUND_UPDATE_DELAY = 300
         private const val INFO_W = 380
         private const val INFO_H = 140
+        private const val MODE_W = 380
+        private const val MODE_H = 140
     }
 }

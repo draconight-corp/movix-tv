@@ -62,6 +62,15 @@ interface TmdbApi {
         @Query("language") language: String = ApiConfig.TMDB_LANGUAGE
     ): TmdbSeasonDetail
 
+    @GET("search/multi")
+    suspend fun searchMulti(
+        @Query("query") query: String,
+        @Query("include_adult") includeAdult: Boolean = false,
+        @Query("page") page: Int = 1,
+        @Query("api_key") apiKey: String = ApiConfig.TMDB_API_KEY,
+        @Query("language") language: String = ApiConfig.TMDB_LANGUAGE
+    ): TmdbListResponse
+
     // ── Catalogue avancé : pagination + filtres par genre/année ──────────────
 
     @GET("movie/popular")
@@ -99,6 +108,31 @@ interface TmdbApi {
         @Query("page") page: Int = 1,
         @Query("sort_by") sortBy: String = "popularity.desc",
         @Query("vote_count.gte") minVotes: Int = 50,
+        @Query("api_key") apiKey: String = ApiConfig.TMDB_API_KEY,
+        @Query("language") language: String = ApiConfig.TMDB_LANGUAGE
+    ): TmdbListResponse
+
+    // ── Anime : discover filtré par genre animation + pays d'origine ──────────
+    // Pour les animés japonais, on combine genre 16 (Animation) + origin_country=JP.
+    // Pas de minVotes ici (beaucoup d'animés cultes ont peu de votes côté TMDB FR).
+
+    @GET("discover/tv")
+    suspend fun discoverAnimeTv(
+        @Query("with_genres") genres: String = "16",
+        @Query("with_origin_country") originCountry: String = "JP",
+        @Query("page") page: Int = 1,
+        @Query("sort_by") sortBy: String = "popularity.desc",
+        @Query("api_key") apiKey: String = ApiConfig.TMDB_API_KEY,
+        @Query("language") language: String = ApiConfig.TMDB_LANGUAGE
+    ): TmdbListResponse
+
+    @GET("discover/movie")
+    suspend fun discoverAnimeMovies(
+        @Query("with_genres") genres: String = "16",
+        @Query("with_original_language") originalLanguage: String = "ja",
+        @Query("page") page: Int = 1,
+        @Query("sort_by") sortBy: String = "popularity.desc",
+        @Query("include_adult") includeAdult: Boolean = false,
         @Query("api_key") apiKey: String = ApiConfig.TMDB_API_KEY,
         @Query("language") language: String = ApiConfig.TMDB_LANGUAGE
     ): TmdbListResponse

@@ -12,8 +12,8 @@ import android.content.Context
  */
 object MovixConfig {
 
-    const val DEFAULT_API_HOST = "api.movix.tax"
-    const val DEFAULT_SITE_HOST = "movix.tax"
+    const val DEFAULT_API_HOST = "api.movix.cloud"
+    const val DEFAULT_SITE_HOST = "movix.cloud"
     private const val PREFS = "movix_config"
     private const val KEY_OVERRIDE = "api_host_override"
     private const val KEY_RESOLVED = "api_host_resolved"

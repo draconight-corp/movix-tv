@@ -13,6 +13,8 @@ import androidx.leanback.widget.Presenter
 import androidx.leanback.widget.Row
 import androidx.leanback.widget.RowPresenter
 import androidx.lifecycle.lifecycleScope
+import com.example.movix.config.AppMode
+import com.example.movix.config.AppModeStore
 import com.example.movix.data.ApiConfig
 import com.example.movix.data.MovixSearchItem
 import com.example.movix.data.Repository
@@ -53,19 +55,40 @@ class SearchFragment : SearchSupportFragment(), SearchSupportFragment.SearchResu
         }
         searchJob = viewLifecycleOwner.lifecycleScope.launch {
             if (!immediate) delay(350)
-            val results = withContext(Dispatchers.IO) { Repository.searchMovix(query) }
-            displayResults(query, results)
+            val mode = AppModeStore.current(requireContext().applicationContext)
+            showStatus("Recherche en cours pour \"$query\"…")
+            val results = withContext(Dispatchers.IO) {
+                if (mode == AppMode.ANIME) Repository.searchAnimeTmdb(query)
+                else Repository.searchMovix(query)
+            }
+            displayResults(query, results, mode)
         }
     }
 
-    private fun displayResults(query: String, items: List<MovixSearchItem>) {
+    private fun showStatus(message: String) {
+        rowsAdapter.clear()
+        val header = HeaderItem(STATUS_HEADER_ID, message)
+        val statusAdapter = ArrayObjectAdapter(StatusPresenter())
+        statusAdapter.add(message)
+        rowsAdapter.add(ListRow(header, statusAdapter))
+    }
+
+    private fun displayResults(query: String, items: List<MovixSearchItem>, mode: AppMode) {
         rowsAdapter.clear()
         val movies = items.mapNotNull { toMovie(it) }
-        if (movies.isEmpty()) return
+        if (movies.isEmpty()) {
+            val emptyMessage = if (mode == AppMode.ANIME)
+                "Aucun animé trouvé pour \"$query\". Essaie un autre titre."
+            else
+                "Aucun résultat pour \"$query\". Vérifie l'orthographe ou essaie un mot clé différent."
+            showStatus(emptyMessage)
+            return
+        }
         val cardPresenter = CardPresenter()
         val rowAdapter = ArrayObjectAdapter(cardPresenter)
         movies.forEach(rowAdapter::add)
-        val header = HeaderItem(0, "Résultats pour \"$query\"")
+        val modeTag = if (mode == AppMode.ANIME) " (Animé)" else ""
+        val header = HeaderItem(0, "Résultats pour \"$query\"$modeTag — ${movies.size}")
         rowsAdapter.add(ListRow(header, rowAdapter))
     }
 
@@ -97,5 +120,36 @@ class SearchFragment : SearchSupportFragment(), SearchSupportFragment.SearchResu
                 startActivity(intent)
             }
         }
+    }
+
+    /**
+     * Présenter minimaliste pour afficher un message d'état (recherche en cours,
+     * pas de résultat) dans une rangée. Évite le sentiment de "bug" quand
+     * l'utilisateur tape mais que rien ne semble se passer.
+     */
+    private inner class StatusPresenter : Presenter() {
+        override fun onCreateViewHolder(parent: android.view.ViewGroup): ViewHolder {
+            val view = android.widget.TextView(parent.context).apply {
+                layoutParams = android.view.ViewGroup.LayoutParams(STATUS_W, STATUS_H)
+                setPadding(32, 32, 32, 32)
+                gravity = android.view.Gravity.CENTER
+                setTextColor(0xFFFFFFFF.toInt())
+                setBackgroundColor(0x33000000)
+                isFocusable = true
+                isFocusableInTouchMode = true
+                textSize = 16f
+            }
+            return ViewHolder(view)
+        }
+        override fun onBindViewHolder(viewHolder: ViewHolder, item: Any?) {
+            (viewHolder.view as android.widget.TextView).text = item as? String ?: ""
+        }
+        override fun onUnbindViewHolder(viewHolder: ViewHolder) {}
+    }
+
+    companion object {
+        private const val STATUS_HEADER_ID = 999L
+        private const val STATUS_W = 900
+        private const val STATUS_H = 200
     }
 }

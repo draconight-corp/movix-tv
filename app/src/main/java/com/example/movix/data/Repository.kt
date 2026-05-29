@@ -26,8 +26,8 @@ object Repository {
         "Mystère" to 9648,
         "Guerre" to 10752,
         "Western" to 37,
-        "Histoire" to 36,
-        "Musique" to 10402
+        "Histoire" to 36
+        // "Musique" (10402) retiré : rangée souvent vide et faisait doublon avec les films.
     )
 
     private val TV_GENRES: List<Pair<String, Int>> = listOf(
@@ -39,7 +39,75 @@ object Repository {
         "Séries Animation" to 16
     )
 
-    suspend fun rows(): List<Pair<String, List<TmdbItem>>> = coroutineScope {
+    /**
+     * Genres TMDB combinés avec un filtre animation+JP pour le mode Animé.
+     * On utilise les genres TV "Action & Aventure" et "SF & Fantastique" qui
+     * sont mieux peuplés que les équivalents film côté animés japonais.
+     */
+    private val ANIME_TV_GENRES: List<Pair<String, String>> = listOf(
+        "Animés Action & Aventure" to "16,10759",
+        "Animés Science-fiction & Fantastique" to "16,10765",
+        "Animés Comédie" to "16,35",
+        "Animés Drame" to "16,18",
+        "Animés Mystère" to "16,9648"
+    )
+
+    suspend fun rows(mode: com.example.movix.config.AppMode): List<Pair<String, List<TmdbItem>>> =
+        when (mode) {
+            com.example.movix.config.AppMode.ANIME -> animeRows()
+            com.example.movix.config.AppMode.FILMS_SERIES -> classicRows()
+        }
+
+    /**
+     * Catalogue Animé : séries et films d'animation japonais, par popularité,
+     * notoriété et genre. On agrège plusieurs pages pour avoir un catalogue
+     * fourni, puis on dédoublonne par id.
+     */
+    private suspend fun animeRows(): List<Pair<String, List<TmdbItem>>> = coroutineScope {
+        val popularAnimeTvD = async {
+            fetchPages(2) { ApiClient.tmdb.discoverAnimeTv(page = it) }
+        }
+        val topAnimeTvD = async {
+            runCatching {
+                ApiClient.tmdb.discoverAnimeTv(sortBy = "vote_average.desc").results
+                    .filter { (it.voteAverage ?: 0.0) >= 7.0 }
+            }.getOrDefault(emptyList())
+        }
+        val popularAnimeMoviesD = async {
+            fetchPages(2) { ApiClient.tmdb.discoverAnimeMovies(page = it) }
+        }
+        val topAnimeMoviesD = async {
+            runCatching {
+                ApiClient.tmdb.discoverAnimeMovies(sortBy = "vote_average.desc").results
+                    .filter { (it.voteAverage ?: 0.0) >= 7.0 }
+            }.getOrDefault(emptyList())
+        }
+        val recentAnimeD = async {
+            runCatching {
+                ApiClient.tmdb.discoverAnimeTv(sortBy = "first_air_date.desc").results
+                    .filter { !it.firstAirDate.isNullOrBlank() }
+            }.getOrDefault(emptyList())
+        }
+        val genreDeferreds = ANIME_TV_GENRES.map { (label, genres) ->
+            label to async {
+                runCatching {
+                    ApiClient.tmdb.discoverAnimeTv(genres = genres).results
+                }.getOrDefault(emptyList())
+            }
+        }
+
+        val baseRows = listOf(
+            "Animés populaires"        to popularAnimeTvD.await(),
+            "Films d'animation populaires" to popularAnimeMoviesD.await(),
+            "Animés mieux notés"       to topAnimeTvD.await(),
+            "Films d'animation cultes" to topAnimeMoviesD.await(),
+            "Nouveautés animés"        to recentAnimeD.await()
+        )
+        val genreRows = genreDeferreds.map { (label, def) -> label to def.await() }
+        (baseRows + genreRows).filter { it.second.isNotEmpty() }
+    }
+
+    private suspend fun classicRows(): List<Pair<String, List<TmdbItem>>> = coroutineScope {
         // ── Rangées "classiques" (multi-pages pour avoir plus de films) ──
         val popularMoviesD = async { fetchPages(3) { ApiClient.tmdb.popularMoviesPage(it) } }
         val popularTvD     = async { fetchPages(2) { ApiClient.tmdb.popularTvPage(it) } }
@@ -105,6 +173,34 @@ object Repository {
     suspend fun searchMovix(query: String): List<MovixSearchItem> = runCatching {
         ApiClient.movix.search(query).results
     }.getOrDefault(emptyList())
+
+    /**
+     * Recherche d'animés : utilise search/multi de TMDB puis garde uniquement
+     * les résultats dont la langue d'origine est ja ET le genre 16 (Animation).
+     * Mappé vers MovixSearchItem pour réutiliser le pipeline existant.
+     */
+    suspend fun searchAnimeTmdb(query: String): List<MovixSearchItem> = runCatching {
+        val resp = ApiClient.tmdb.searchMulti(query = query)
+        resp.results
+            .filter { it.mediaType == "movie" || it.mediaType == "tv" }
+            .filter { it.isAnime }
+            .map { it.toMovixSearchItem() }
+    }.getOrDefault(emptyList())
+
+    private fun TmdbItem.toMovixSearchItem(): MovixSearchItem = MovixSearchItem(
+        id = id,
+        tmdbId = id,
+        title = title,
+        name = name,
+        type = if (mediaType == "tv" || (name != null && title == null)) "tv" else "movie",
+        modelType = mediaType,
+        posterPath = posterPath,
+        poster = ApiConfig.posterUrl(posterPath),
+        overview = overview,
+        releaseDate = releaseDate,
+        firstAirDate = firstAirDate,
+        voteAverage = voteAverage
+    )
 
     suspend fun resolveSources(
         tmdbId: Long,

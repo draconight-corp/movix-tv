@@ -22,11 +22,13 @@ object MirrorResolver {
     private val DEAD_DOMAINS = setOf(
         "movix.health",
         "movix.help", "movix.llc", "movix.rodeo", "movix.blog",
-        "movix.club", "movix.website", "movix.site"
+        "movix.club", "movix.website", "movix.site",
+        "movix.tax"
     )
 
     // Hôtes de fallback si l'auto-détection échoue (à essayer dans l'ordre).
     val FALLBACK_HOSTS = listOf(
+        "api.movix.cloud",
         "api.movix.tax",
         "api.movix.health"
     )

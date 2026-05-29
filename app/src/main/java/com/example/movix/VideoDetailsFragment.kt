@@ -283,6 +283,7 @@ class VideoDetailsFragment : DetailsSupportFragment() {
             val title = buildString {
                 append("Sources (${links.size}) — ${grouped.size} catégorie(s)")
                 if (deadCount > 0) append(" • ${deadCount} mortes filtrées")
+                if (isSpiderNoir(m)) append("\nℹ️ Version noir & blanc dispo dans Seekstreaming 4")
             }
             val flatLabels = links.map { "[${it.category}]  ${it.displayName()}" }.toTypedArray()
             AlertDialog.Builder(requireContext(), R.style.MovixDialog)
@@ -336,6 +337,20 @@ class VideoDetailsFragment : DetailsSupportFragment() {
             }
         }
         startActivity(intent)
+    }
+
+    /**
+     * Détecte la série Spider-Noir (Prime Video, 2026) — diffusée à la fois
+     * en couleur et en noir & blanc. Sur Movix, la version N&B n'est dispo
+     * que via la source Seekstreaming 4 ; on l'indique dans le sélecteur.
+     * Match tolérant : "spider-noir", "spider noir", "spidernoir".
+     */
+    private fun isSpiderNoir(m: Movie): Boolean {
+        val t = (m.title ?: "").lowercase()
+            .replace("-", " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        return t.contains("spider noir") || t.contains("spidernoir")
     }
 
     private fun isDirectStream(url: String): Boolean {

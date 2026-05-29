@@ -26,11 +26,24 @@ data class TmdbItem(
     @Json(name = "number_of_seasons") val numberOfSeasons: Int? = null,
     val seasons: List<TmdbSeason>? = null,
     val genres: List<TmdbGenre>? = null,
+    @Json(name = "genre_ids") val genreIds: List<Long>? = null,
+    @Json(name = "original_language") val originalLanguage: String? = null,
+    @Json(name = "origin_country") val originCountry: List<String>? = null,
     val runtime: Int? = null
 ) {
     val displayTitle: String get() = title ?: name ?: "Sans titre"
     val displayDate: String? get() = releaseDate ?: firstAirDate
     val isTv: Boolean get() = mediaType == "tv" || name != null && title == null
+
+    /** Heuristique : animation japonaise = genre 16 (Animation) ET origine Japon. */
+    val isAnime: Boolean
+        get() {
+            val isJapanese = originalLanguage == "ja" ||
+                originCountry?.contains("JP") == true
+            val isAnimation = genreIds?.contains(16L) == true ||
+                genres?.any { it.id == 16L } == true
+            return isJapanese && isAnimation
+        }
 }
 
 @JsonClass(generateAdapter = true)
