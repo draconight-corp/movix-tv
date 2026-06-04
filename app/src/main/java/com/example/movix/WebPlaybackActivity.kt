@@ -5,12 +5,14 @@ import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
+import android.os.CountDownTimer
 import android.os.SystemClock
 import android.util.TypedValue
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -49,6 +51,11 @@ class WebPlaybackActivity : FragmentActivity() {
     private var backLongPressFired = false
     private var okLongPressFired = false
     private var cursorMode = false
+
+    // Décompte "épisode suivant" déclenché par la fin de lecture (via le pont JS)
+    private var nextEpisodeCountdown: CountDownTimer? = null
+    private var countdownDialog: AlertDialog? = null
+
     private var cursorX = 0f
     private var cursorY = 0f
     private val cursorStepPx by lazy {
@@ -134,6 +141,9 @@ class WebPlaybackActivity : FragmentActivity() {
             setSupportMultipleWindows(false)
             javaScriptCanOpenWindowsAutomatically = false
         }
+        // Pont JS → natif : permet au script ENDED_DETECT_JS de signaler la
+        // fin réelle de la vidéo pour enchaîner sur l'épisode suivant.
+        addJavascriptInterface(MovixJsBridge(), "MovixNative")
         webChromeClient = object : WebChromeClient() {
             override fun onCreateWindow(
                 view: WebView, isDialog: Boolean,
@@ -165,6 +175,8 @@ class WebPlaybackActivity : FragmentActivity() {
                 super.onPageFinished(view, url)
                 view.evaluateJavascript(AdBlocker.ANTI_POPUP_JS, null)
                 view.evaluateJavascript(AdBlocker.FORCE_PLAY_JS, null)
+                // Détection de fin de lecture → épisode suivant (séries uniquement)
+                if (isEpisode) view.evaluateJavascript(AdBlocker.ENDED_DETECT_JS, null)
             }
         }
         isFocusable = true
@@ -369,12 +381,76 @@ class WebPlaybackActivity : FragmentActivity() {
             .show()
     }
 
+    /**
+     * Pont exposé à la WebView sous le nom `MovixNative`. Le script
+     * [AdBlocker.ENDED_DETECT_JS] appelle [onVideoEnded] quand la lecture est
+     * VRAIMENT terminée (événement `ended`, pas une pause). L'appel arrive sur
+     * un thread binder → on repasse sur le thread UI.
+     */
+    private inner class MovixJsBridge {
+        @JavascriptInterface
+        fun onVideoEnded() {
+            runOnUiThread { onPlaybackEnded() }
+        }
+    }
+
+    /**
+     * Fin de lecture détectée : pour une série, lance un petit décompte
+     * (annulable) avant d'enchaîner sur l'épisode suivant.
+     */
+    private fun onPlaybackEnded() {
+        if (isFinishing || isDestroyed) return
+        if (!isEpisode) return
+        if (countdownDialog?.isShowing == true) return
+        startNextEpisodeCountdown()
+    }
+
+    private fun startNextEpisodeCountdown() {
+        nextEpisodeCountdown?.cancel()
+        val seconds = NEXT_EP_COUNTDOWN_MS / 1000
+        val dialog = AlertDialog.Builder(this, R.style.MovixDialog)
+            .setTitle("Épisode terminé")
+            .setMessage("Épisode suivant dans $seconds s…")
+            .setCancelable(true)
+            .setPositiveButton("Lancer maintenant", null)
+            .setNegativeButton("Annuler", null)
+            .create()
+        countdownDialog = dialog
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+                nextEpisodeCountdown?.cancel()
+                dialog.dismiss()
+                playNextEpisode()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setOnClickListener {
+                nextEpisodeCountdown?.cancel()
+                dialog.dismiss()
+            }
+        }
+        dialog.setOnDismissListener {
+            countdownDialog = null
+            nextEpisodeCountdown?.cancel()
+            nextEpisodeCountdown = null
+        }
+        dialog.show()
+        nextEpisodeCountdown = object : CountDownTimer(NEXT_EP_COUNTDOWN_MS, 1000) {
+            override fun onTick(msUntilFinished: Long) {
+                val s = (msUntilFinished / 1000) + 1
+                dialog.setMessage("Épisode suivant dans $s s…")
+            }
+            override fun onFinish() {
+                if (dialog.isShowing) dialog.dismiss()
+                playNextEpisode()
+            }
+        }.start()
+    }
+
     private fun playNextEpisode() {
         if (!isEpisode) return
         Toast.makeText(this, "Recherche de l'épisode suivant…", Toast.LENGTH_SHORT).show()
         lifecycleScope.launch {
             val next = withContext(Dispatchers.IO) {
-                PlaybackNavigator.resolveNext(applicationContext, tmdbId, currentSeason, currentEpisode)
+                PlaybackNavigator.resolveNext(applicationContext, tmdbId, currentSeason, currentEpisode, movieTitle)
             }
             if (next == null) {
                 Toast.makeText(this@WebPlaybackActivity, "Pas d'épisode suivant disponible", Toast.LENGTH_LONG).show()
@@ -451,6 +527,10 @@ class WebPlaybackActivity : FragmentActivity() {
     }
 
     override fun onDestroy() {
+        nextEpisodeCountdown?.cancel()
+        nextEpisodeCountdown = null
+        countdownDialog?.dismiss()
+        countdownDialog = null
         runCatching {
             webView.stopLoading()
             (webView.parent as? android.view.ViewGroup)?.removeView(webView)
@@ -460,6 +540,9 @@ class WebPlaybackActivity : FragmentActivity() {
     }
 
     companion object {
+        // Délai avant lancement automatique de l'épisode suivant en fin de lecture
+        private const val NEXT_EP_COUNTDOWN_MS = 8_000L
+
         const val EXTRA_URL = "extra_url"
         const val EXTRA_TITLE = "extra_title"
         const val EXTRA_URLS = "extra_urls"

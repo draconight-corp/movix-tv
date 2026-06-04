@@ -126,6 +126,32 @@ interface TmdbApi {
         @Query("language") language: String = ApiConfig.TMDB_LANGUAGE
     ): TmdbListResponse
 
+    // ── Dessins animés occidentaux (Rick et Morty, BoJack, Family Guy…) ───────
+    // Genre 16 (Animation) + origine US/GB/CA. Ces titres ne sont PAS japonais
+    // et étaient donc exclus du mode Animé filtré sur origin_country=JP.
+    @GET("discover/tv")
+    suspend fun discoverWesternAnimationTv(
+        @Query("with_genres") genres: String = "16",
+        @Query("with_origin_country") originCountry: String = "US|GB|CA",
+        @Query("page") page: Int = 1,
+        @Query("sort_by") sortBy: String = "popularity.desc",
+        @Query("vote_count.gte") minVotes: Int = 50,
+        @Query("api_key") apiKey: String = ApiConfig.TMDB_API_KEY,
+        @Query("language") language: String = ApiConfig.TMDB_LANGUAGE
+    ): TmdbListResponse
+
+    // ── Suggestions "au hasard" pour le défilement infini (mode Films) ────────
+    // discover/movie sans filtre de genre, trié par popularité, paginé.
+    @GET("discover/movie")
+    suspend fun discoverAllMovies(
+        @Query("page") page: Int = 1,
+        @Query("sort_by") sortBy: String = "popularity.desc",
+        @Query("vote_count.gte") minVotes: Int = 150,
+        @Query("include_adult") includeAdult: Boolean = false,
+        @Query("api_key") apiKey: String = ApiConfig.TMDB_API_KEY,
+        @Query("language") language: String = ApiConfig.TMDB_LANGUAGE
+    ): TmdbListResponse
+
     @GET("discover/movie")
     suspend fun discoverAnimeMovies(
         @Query("with_genres") genres: String = "16",

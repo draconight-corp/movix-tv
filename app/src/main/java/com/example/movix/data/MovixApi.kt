@@ -42,6 +42,16 @@ interface MovixApi {
     @GET("api/fstream/movie/{id}")
     suspend fun fstreamMovie(@Path("id") tmdbId: Long): FstreamResponse
 
+    // ─── Anime (anime-sama, proxifié par Movix) — recherche par TITRE ───────
+    // NB : pas de préfixe /api ici. Renvoie un tableau de résultats avec
+    // saisons + épisodes + streaming_links.
+    @GET("anime/search/{query}")
+    suspend fun animeSearch(
+        @Path("query") query: String,
+        @Query("includeSeasons") includeSeasons: Boolean = true,
+        @Query("includeEpisodes") includeEpisodes: Boolean = true
+    ): List<AnimeSearchResult>
+
     // ─── Custom links (Firebase) — d'où viennent les sources SeekStreaming ──
     // Pas de path saison/épisode côté TV : l'endpoint renvoie tous les épisodes
     // d'un coup, on filtre côté client.

@@ -47,6 +47,12 @@ class MainFragment : BrowseSupportFragment() {
 
     private lateinit var rowsAdapter: ArrayObjectAdapter
 
+    // ── État du défilement infini "Je ne sais pas quoi regarder" ─────────────
+    private var suggestionAdapter: ArrayObjectAdapter? = null
+    private var suggestionPage = 0
+    private var loadingMore = false
+    private val suggestionSeen = mutableSetOf<Long>()
+
     override fun onActivityCreated(savedInstanceState: Bundle?) {
         super.onActivityCreated(savedInstanceState)
         prepareBackgroundManager()
@@ -98,6 +104,12 @@ class MainFragment : BrowseSupportFragment() {
             val cardPresenter = CardPresenter()
             rowsAdapter.clear()
 
+            // Réinitialise l'état du défilement infini à chaque (re)chargement
+            suggestionPage = 0
+            loadingMore = false
+            suggestionSeen.clear()
+            suggestionAdapter = null
+
             // ── Rangée "Mode" en tout premier — bascule Films/Séries <-> Animé
             var rowIndex = 0L
             val modeAdapter = ArrayObjectAdapter(ModeItemPresenter())
@@ -125,6 +137,15 @@ class MainFragment : BrowseSupportFragment() {
                 }
                 rowsAdapter.add(ListRow(HeaderItem(rowIndex++, "Reprendre"), resumeAdapter))
             }
+
+            // ── Suggestions à défilement infini ─────────────────────────────
+            val suggAdapter = ArrayObjectAdapter(cardPresenter)
+            suggestionAdapter = suggAdapter
+            rowsAdapter.add(ListRow(
+                HeaderItem(rowIndex++, "Je ne sais pas quoi regarder — défilez pour plus"),
+                suggAdapter
+            ))
+            loadMoreSuggestions()
 
             rows.forEach { (title, items) ->
                 val rowAdapter = ArrayObjectAdapter(cardPresenter)
@@ -246,7 +267,39 @@ class MainFragment : BrowseSupportFragment() {
             if (item is Movie) {
                 backgroundUri = item.backgroundImageUrl
                 startBackgroundTimer()
+                maybeLoadMoreSuggestions(item, row)
             }
+        }
+    }
+
+    /**
+     * Quand l'item sélectionné approche la fin de la rangée "suggestions",
+     * charge la page suivante et l'ajoute à la suite (défilement infini).
+     */
+    private fun maybeLoadMoreSuggestions(item: Movie, row: Row?) {
+        val adapter = suggestionAdapter ?: return
+        if (row !is ListRow || row.adapter !== adapter) return
+        val idx = adapter.indexOf(item)
+        if (idx >= 0 && idx >= adapter.size() - PREFETCH_THRESHOLD) {
+            loadMoreSuggestions()
+        }
+    }
+
+    private fun loadMoreSuggestions() {
+        if (loadingMore) return
+        val adapter = suggestionAdapter ?: return
+        loadingMore = true
+        val mode = AppModeStore.current(requireContext().applicationContext)
+        val nextPage = suggestionPage + 1
+        lifecycleScope.launch {
+            val items = runCatching { Repository.suggestionPage(mode, nextPage) }.getOrDefault(emptyList())
+            // Ignore si le mode a changé entre-temps (adapter remplacé)
+            if (suggestionAdapter === adapter) {
+                items.filter { suggestionSeen.add(it.id) }
+                    .forEach { adapter.add(Movie.fromTmdb(it)) }
+                if (items.isNotEmpty()) suggestionPage = nextPage
+            }
+            loadingMore = false
         }
     }
 
@@ -325,6 +378,8 @@ class MainFragment : BrowseSupportFragment() {
     companion object {
         private const val TAG = "MainFragment"
         private const val BACKGROUND_UPDATE_DELAY = 300
+        // Précharge la page suivante quand il reste ≤ N cartes avant la fin
+        private const val PREFETCH_THRESHOLD = 6
         private const val INFO_W = 380
         private const val INFO_H = 140
         private const val MODE_W = 380

@@ -35,13 +35,15 @@ data class TmdbItem(
     val displayDate: String? get() = releaseDate ?: firstAirDate
     val isTv: Boolean get() = mediaType == "tv" || name != null && title == null
 
+    /** Vrai si le genre 16 (Animation) est présent — anime JP ou dessin animé occidental. */
+    val isAnimation: Boolean
+        get() = genreIds?.contains(16L) == true || genres?.any { it.id == 16L } == true
+
     /** Heuristique : animation japonaise = genre 16 (Animation) ET origine Japon. */
     val isAnime: Boolean
         get() {
             val isJapanese = originalLanguage == "ja" ||
                 originCountry?.contains("JP") == true
-            val isAnimation = genreIds?.contains(16L) == true ||
-                genres?.any { it.id == 16L } == true
             return isJapanese && isAnimation
         }
 }

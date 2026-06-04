@@ -3,6 +3,7 @@ package com.example.movix
 import android.app.AlertDialog
 import android.content.Intent
 import android.os.Bundle
+import android.os.CountDownTimer
 import android.view.KeyEvent
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
@@ -18,6 +19,10 @@ class PlaybackActivity : FragmentActivity() {
     private var labels: MutableList<String> = mutableListOf()
     private var currentIndex: Int = 0
     private var longPressFired = false
+
+    // Décompte "épisode suivant" déclenché par la fin de lecture ExoPlayer
+    private var nextEpisodeCountdown: CountDownTimer? = null
+    private var countdownDialog: AlertDialog? = null
 
     private var tmdbId: Long = 0
     private var isTv: Boolean = false
@@ -121,12 +126,72 @@ class PlaybackActivity : FragmentActivity() {
             .show()
     }
 
+    /**
+     * Appelé par [PlaybackVideoFragment] quand ExoPlayer atteint STATE_ENDED
+     * (vraie fin de lecture, pas une pause). Lance un décompte annulable avant
+     * d'enchaîner sur l'épisode suivant.
+     */
+    fun onPlaybackEnded() {
+        if (isFinishing || isDestroyed) return
+        if (!isEpisode) return
+        if (countdownDialog?.isShowing == true) return
+        startNextEpisodeCountdown()
+    }
+
+    private fun startNextEpisodeCountdown() {
+        nextEpisodeCountdown?.cancel()
+        val seconds = NEXT_EP_COUNTDOWN_MS / 1000
+        val dialog = AlertDialog.Builder(this, R.style.MovixDialog)
+            .setTitle("Épisode terminé")
+            .setMessage("Épisode suivant dans $seconds s…")
+            .setCancelable(true)
+            .setPositiveButton("Lancer maintenant", null)
+            .setNegativeButton("Annuler", null)
+            .create()
+        countdownDialog = dialog
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE)?.setOnClickListener {
+                nextEpisodeCountdown?.cancel()
+                dialog.dismiss()
+                playNextEpisode()
+            }
+            dialog.getButton(AlertDialog.BUTTON_NEGATIVE)?.setOnClickListener {
+                nextEpisodeCountdown?.cancel()
+                dialog.dismiss()
+            }
+        }
+        dialog.setOnDismissListener {
+            countdownDialog = null
+            nextEpisodeCountdown?.cancel()
+            nextEpisodeCountdown = null
+        }
+        dialog.show()
+        nextEpisodeCountdown = object : CountDownTimer(NEXT_EP_COUNTDOWN_MS, 1000) {
+            override fun onTick(msUntilFinished: Long) {
+                val s = (msUntilFinished / 1000) + 1
+                dialog.setMessage("Épisode suivant dans $s s…")
+            }
+            override fun onFinish() {
+                if (dialog.isShowing) dialog.dismiss()
+                playNextEpisode()
+            }
+        }.start()
+    }
+
+    override fun onDestroy() {
+        nextEpisodeCountdown?.cancel()
+        nextEpisodeCountdown = null
+        countdownDialog?.dismiss()
+        countdownDialog = null
+        super.onDestroy()
+    }
+
     private fun playNextEpisode() {
         if (!isEpisode) return
         Toast.makeText(this, "Recherche de l'épisode suivant…", Toast.LENGTH_SHORT).show()
         lifecycleScope.launch {
             val next = withContext(Dispatchers.IO) {
-                PlaybackNavigator.resolveNext(applicationContext, tmdbId, currentSeason, currentEpisode)
+                PlaybackNavigator.resolveNext(applicationContext, tmdbId, currentSeason, currentEpisode, movieTitle)
             }
             if (next == null) {
                 Toast.makeText(this@PlaybackActivity, "Pas d'épisode suivant disponible", Toast.LENGTH_LONG).show()
@@ -175,6 +240,9 @@ class PlaybackActivity : FragmentActivity() {
     }
 
     companion object {
+        // Délai avant lancement automatique de l'épisode suivant en fin de lecture
+        private const val NEXT_EP_COUNTDOWN_MS = 8_000L
+
         // Extras partagés avec WebPlaybackActivity (mêmes clés pour symétrie)
         const val EXTRA_URL = "extra_url"
         const val EXTRA_TITLE = "extra_title"

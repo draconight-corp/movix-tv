@@ -251,10 +251,20 @@ class VideoDetailsFragment : DetailsSupportFragment() {
 
     private fun resolveAndPlay(m: Movie, season: Int?, episode: Int?) {
         Toast.makeText(requireContext(), R.string.loading, Toast.LENGTH_SHORT).show()
+        val isAnimeMode = com.example.movix.config.AppModeStore.current(
+            requireContext().applicationContext
+        ) == com.example.movix.config.AppMode.ANIME
         lifecycleScope.launch {
             val raw = runCatching {
                 withContext(Dispatchers.IO) {
-                    Repository.aggregateAllSources(m.tmdbId, m.isTv, season, episode)
+                    // En mode Animé, les sources viennent d'anime-sama (recherche
+                    // par titre) ; on ne retombe sur les providers TMDB que si
+                    // l'animé n'est pas trouvé.
+                    val anime = if (isAnimeMode && !m.title.isNullOrBlank())
+                        Repository.resolveAnimeSources(m.title!!, season, episode)
+                    else emptyList()
+                    if (anime.isNotEmpty()) anime
+                    else Repository.aggregateAllSources(m.tmdbId, m.isTv, season, episode)
                 }
             }.getOrDefault(emptyList())
             if (raw.isEmpty()) {

@@ -88,6 +88,16 @@ object Repository {
                     .filter { !it.firstAirDate.isNullOrBlank() }
             }.getOrDefault(emptyList())
         }
+        // Dessins animés occidentaux (Rick et Morty, BoJack Horseman, Family Guy…)
+        val westernAnimationD = async {
+            fetchPages(2) { ApiClient.tmdb.discoverWesternAnimationTv(page = it) }
+        }
+        val topWesternAnimationD = async {
+            runCatching {
+                ApiClient.tmdb.discoverWesternAnimationTv(sortBy = "vote_average.desc", minVotes = 300)
+                    .results.filter { (it.voteAverage ?: 0.0) >= 7.5 }
+            }.getOrDefault(emptyList())
+        }
         val genreDeferreds = ANIME_TV_GENRES.map { (label, genres) ->
             label to async {
                 runCatching {
@@ -98,8 +108,10 @@ object Repository {
 
         val baseRows = listOf(
             "Animés populaires"        to popularAnimeTvD.await(),
+            "Dessins animés (US/UK)"   to westernAnimationD.await(),
             "Films d'animation populaires" to popularAnimeMoviesD.await(),
             "Animés mieux notés"       to topAnimeTvD.await(),
+            "Dessins animés cultes"    to topWesternAnimationD.await(),
             "Films d'animation cultes" to topAnimeMoviesD.await(),
             "Nouveautés animés"        to recentAnimeD.await()
         )
@@ -175,16 +187,40 @@ object Repository {
     }.getOrDefault(emptyList())
 
     /**
-     * Recherche d'animés : utilise search/multi de TMDB puis garde uniquement
-     * les résultats dont la langue d'origine est ja ET le genre 16 (Animation).
-     * Mappé vers MovixSearchItem pour réutiliser le pipeline existant.
+     * Recherche d'animation : utilise search/multi de TMDB puis garde tout ce qui
+     * porte le genre 16 (Animation) — animés japonais ET dessins animés
+     * occidentaux (Rick et Morty, BoJack…). On NE filtre PLUS sur l'origine
+     * japonaise, qui rejetait à tort tous les dessins animés US et certains
+     * animés mal tagués.
+     *
+     * Si aucun résultat ne porte le genre 16 (search/multi ne renvoie pas
+     * toujours les genre_ids), on retombe sur les résultats films/séries bruts
+     * plutôt que de renvoyer une liste vide.
      */
     suspend fun searchAnimeTmdb(query: String): List<MovixSearchItem> = runCatching {
         val resp = ApiClient.tmdb.searchMulti(query = query)
-        resp.results
+        val mediaResults = resp.results
             .filter { it.mediaType == "movie" || it.mediaType == "tv" }
-            .filter { it.isAnime }
-            .map { it.toMovixSearchItem() }
+        val animation = mediaResults.filter { it.isAnimation }
+        val chosen = if (animation.isNotEmpty()) animation else mediaResults
+        chosen.map { it.toMovixSearchItem() }
+    }.getOrDefault(emptyList())
+
+    /**
+     * Une page de suggestions pour le défilement infini "Je ne sais pas quoi
+     * regarder". Films populaires variés en mode classique, animés/dessins
+     * animés en mode Animé. Tolère les échecs (renvoie liste vide).
+     */
+    suspend fun suggestionPage(
+        mode: com.example.movix.config.AppMode,
+        page: Int
+    ): List<TmdbItem> = runCatching {
+        when (mode) {
+            com.example.movix.config.AppMode.ANIME ->
+                ApiClient.tmdb.discoverAnimeTv(page = page).results
+            com.example.movix.config.AppMode.FILMS_SERIES ->
+                ApiClient.tmdb.discoverAllMovies(page = page).results
+        }
     }.getOrDefault(emptyList())
 
     private fun TmdbItem.toMovixSearchItem(): MovixSearchItem = MovixSearchItem(
@@ -202,24 +238,14 @@ object Repository {
         voteAverage = voteAverage
     )
 
-    suspend fun resolveSources(
-        tmdbId: Long,
-        isTv: Boolean,
-        season: Int? = null,
-        episode: Int? = null
-    ): MovixSourcesResponse? = runCatching {
-        ApiClient.movix.sources(
-            type = if (isTv) "tv" else "movie",
-            tmdbId = tmdbId,
-            season = season,
-            episode = episode
-        )
-    }.getOrNull()
-
     /**
-     * Aggrège les sources de TOUS les providers Movix en parallèle.
+     * Aggrège les sources de TOUS les providers en parallèle.
      * Renvoie une liste unifiée de [MovixLink] avec champ `category` rempli
      * pour pouvoir grouper dans l'UI.
+     *
+     * NB : la source « Movix 1 » (endpoint Coflix `api/tmdb/...`) a été retirée :
+     * ses liens ne fonctionnaient jamais. On ne garde que Cpasmal (Viper),
+     * Wiflix (Lynx), FStream et les custom-links (SeekStreaming).
      */
     suspend fun aggregateAllSources(
         tmdbId: Long,
@@ -227,16 +253,6 @@ object Repository {
         season: Int? = null,
         episode: Int? = null
     ): List<MovixLink> = coroutineScope {
-        val movix1Deferred = async {
-            runCatching {
-                ApiClient.movix.sources(
-                    type = if (isTv) "tv" else "movie",
-                    tmdbId = tmdbId,
-                    season = season,
-                    episode = episode
-                )
-            }.getOrNull()
-        }
         val cpasmalDeferred = async {
             runCatching {
                 if (isTv && season != null && episode != null)
@@ -272,7 +288,6 @@ object Repository {
         }
 
         val all = mutableListOf<MovixLink>()
-        all += parseMovix1(movix1Deferred.await(), season, episode)
         all += parseCpasmal(cpasmalDeferred.await())
         all += parseWiflix(wiflixDeferred.await())
         all += parseFstream(fstreamDeferred.await())
@@ -358,41 +373,6 @@ object Repository {
         return 3
     }
 
-    private fun parseMovix1(
-        resp: MovixSourcesResponse?,
-        season: Int?,
-        episode: Int?
-    ): List<MovixLink> {
-        if (resp == null) return emptyList()
-        val ep = resp.currentEpisode
-        val (rawLinks, iframe) = if (season != null && episode != null && ep != null)
-            (ep.playerLinks.orEmpty()) to ep.iframeSrc
-        else
-            (resp.playerLinks.orEmpty()) to resp.iframeSrc
-
-        val out = mutableListOf<MovixLink>()
-        iframe?.takeIf { it.isNotBlank() }?.let {
-            out += MovixLink(
-                url = it,
-                host = "Lecteur principal",
-                language = "FR",
-                quality = null,
-                category = "Movix 1"
-            )
-        }
-        rawLinks.forEach { l ->
-            val u = l.bestUrl() ?: return@forEach
-            out += MovixLink(
-                url = u,
-                host = hostOf(u),
-                language = l.language ?: "FR",
-                quality = l.quality,
-                category = "Movix 1"
-            )
-        }
-        return out
-    }
-
     private fun parseCpasmal(resp: CpasmalResponse?): List<MovixLink> {
         if (resp?.links == null) return emptyList()
         val out = mutableListOf<MovixLink>()
@@ -462,4 +442,99 @@ object Repository {
 
     private fun hostOf(url: String): String =
         runCatching { java.net.URI(url).host?.removePrefix("www.") }.getOrNull() ?: "?"
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  Sources Animé (anime-sama via api.movix.cloud/anime/search)
+    //  Le catalogue animé du site ne passe PAS par les providers TMDB :
+    //  il cherche par TITRE sur anime-sama et renvoie des embeds Vidmoly /
+    //  Sibnet / Sendvid par langue. On reproduit ça ici.
+    // ──────────────────────────────────────────────────────────────────────
+
+    /**
+     * Résout les sources d'un animé à partir de son titre TMDB + numéro de
+     * saison/épisode. Renvoie une liste vide si rien n'est trouvé (l'appelant
+     * peut alors retomber sur [aggregateAllSources]).
+     *
+     * @param season numéro de saison TMDB (mappé sur "Saison N" d'anime-sama)
+     * @param episode numéro d'épisode (mappé sur l'index d'anime-sama)
+     */
+    suspend fun resolveAnimeSources(
+        title: String,
+        season: Int?,
+        episode: Int?
+    ): List<MovixLink> {
+        val results = runCatching { ApiClient.movix.animeSearch(title) }.getOrDefault(emptyList())
+        val match = pickAnimeMatch(results, title) ?: return emptyList()
+        val animeSeason = pickAnimeSeason(match.seasons.orEmpty(), season) ?: return emptyList()
+        val eps = animeSeason.episodes.orEmpty()
+        val ep = when {
+            episode != null -> eps.firstOrNull { it.index == episode } ?: eps.getOrNull(episode - 1)
+            else -> eps.firstOrNull()
+        } ?: return emptyList()
+
+        return ep.streamingLinks.orEmpty().flatMap { sl ->
+            val lang = (sl.language ?: "").uppercase().ifBlank { "FR" }
+            sl.players.orEmpty()
+                .filter { it.isNotBlank() }
+                .map { url ->
+                    MovixLink(
+                        url = url,
+                        host = hostOf(url),
+                        language = lang,
+                        category = "Anime-Sama $lang"
+                    )
+                }
+        }
+    }
+
+    /** Normalise un titre pour comparaison tolérante (accents, casse, espaces). */
+    private fun normalizeTitle(s: String?): String =
+        (s ?: "").lowercase()
+            .let { java.text.Normalizer.normalize(it, java.text.Normalizer.Form.NFD) }
+            .replace(Regex("\\p{Mn}+"), "")
+            .replace(Regex("[^a-z0-9]+"), " ")
+            .trim()
+
+    private fun pickAnimeMatch(
+        results: List<AnimeSearchResult>,
+        title: String
+    ): AnimeSearchResult? {
+        if (results.isEmpty()) return null
+        val norm = normalizeTitle(title)
+        // 1) nom exact
+        results.firstOrNull { normalizeTitle(it.name) == norm }?.let { return it }
+        // 2) un des noms alternatifs exact
+        results.firstOrNull { r ->
+            r.alternativeNames?.any { normalizeTitle(it) == norm } == true ||
+                normalizeTitle(r.alternativeNamesString).split(" , ", ",")
+                    .any { normalizeTitle(it) == norm }
+        }?.let { return it }
+        // 3) inclusion partielle dans un sens ou l'autre
+        results.firstOrNull { r ->
+            val n = normalizeTitle(r.name)
+            n.isNotEmpty() && (n.contains(norm) || norm.contains(n))
+        }?.let { return it }
+        // 4) à défaut, le 1er (l'API trie déjà par pertinence)
+        return results.first()
+    }
+
+    private fun pickAnimeSeason(
+        seasons: List<AnimeSeasonData>,
+        season: Int?
+    ): AnimeSeasonData? {
+        if (seasons.isEmpty()) return null
+        if (season == null) {
+            // Film / contenu sans saison : on privilégie une saison numérotée.
+            return seasons.firstOrNull { it.name?.contains("saison", true) == true }
+                ?: seasons.first()
+        }
+        // "Saison N" (tolère un zéro de tête : "Saison 01")
+        val rx = Regex("(?i)saison\\s*0*$season(\\b|\$)")
+        seasons.firstOrNull { it.name?.let { n -> rx.containsMatchIn(n) } == true }?.let { return it }
+        // Sinon : la N-ième saison numérotée, puis fallback positionnel.
+        val numbered = seasons.filter { it.name?.contains("saison", true) == true }
+        return numbered.getOrNull(season - 1)
+            ?: seasons.getOrNull(season - 1)
+            ?: seasons.first()
+    }
 }

@@ -330,16 +330,38 @@ object AdBlocker {
 
     /**
      * Tente de lancer la lecture sans intervention utilisateur :
-     *  - démute et appelle .play() sur tous les <video>
+     *  - démute et appelle .play() sur tous les <video> qui n'ont PAS encore démarré
      *  - clique tout bouton "play" évident (selectors les plus courants)
      *  - retry à 0/1.5s/3s/5s pour les players qui se chargent en JS
+     *
+     * IMPORTANT — respect de la pause utilisateur :
+     * dès qu'une lecture a commencé (currentTime > 0), le script s'arrête
+     * définitivement (flag __movixStarted). Ainsi, si l'utilisateur met en
+     * pause juste après le démarrage, les retries différés (1,5 / 3 / 5 s) ne
+     * viennent PLUS relancer la vidéo. tryPlay() ne touche d'ailleurs jamais
+     * une <video> dont currentTime > 0.
      */
     val FORCE_PLAY_JS = """
         (function() {
+          function anyStarted() {
+            try {
+              var vids = document.querySelectorAll('video');
+              for (var i = 0; i < vids.length; i++) {
+                var v = vids[i];
+                // currentTime>0 = la lecture a déjà commencé (même si en pause).
+                if (v.currentTime > 0 || (!v.paused && !v.ended && v.readyState > 2)) return true;
+              }
+            } catch(e){}
+            return false;
+          }
           function tryPlay() {
+            // Une fois la lecture lancée, on ne combat plus jamais l'utilisateur.
+            if (window.__movixStarted) return false;
+            if (anyStarted()) { window.__movixStarted = true; return false; }
             var clicked = false;
             try {
               document.querySelectorAll('video').forEach(function(v){
+                if (v.currentTime > 0) return; // ne pas relancer une vidéo en cours/pause
                 try { v.muted = false; v.removeAttribute('muted'); v.play(); } catch(e){}
               });
             } catch(e){}
@@ -368,6 +390,62 @@ object AdBlocker {
           setTimeout(tryPlay, 1500);
           setTimeout(tryPlay, 3000);
           setTimeout(tryPlay, 5000);
+        })();
+    """.trimIndent()
+
+    /**
+     * Détecte la VRAIE fin de lecture d'une <video> (événement `ended` ou
+     * lecture arrivée à < 0,7 s de la fin) — à NE PAS confondre avec une pause.
+     * Quand c'est détecté, appelle le pont natif `MovixNative.onVideoEnded()`
+     * (une seule fois par page grâce au flag __movixEndedFired) pour que
+     * l'activité enchaîne sur l'épisode suivant après un petit décompte.
+     *
+     * Ne fonctionne que pour les <video> du même document (players qui
+     * n'enferment pas la vidéo dans une iframe cross-origin inaccessible).
+     */
+    val ENDED_DETECT_JS = """
+        (function() {
+          if (window.__movixEndedInstalled) return;
+          window.__movixEndedInstalled = true;
+          function fire() {
+            if (window.__movixEndedFired) return;
+            window.__movixEndedFired = true;
+            try {
+              if (window.MovixNative && window.MovixNative.onVideoEnded) {
+                window.MovixNative.onVideoEnded();
+              }
+            } catch(e){}
+          }
+          function attach(v) {
+            if (!v || v.__movixEndedAttached) return;
+            v.__movixEndedAttached = true;
+            try { v.addEventListener('ended', fire); } catch(e){}
+          }
+          function scan() {
+            try { document.querySelectorAll('video').forEach(attach); } catch(e){}
+          }
+          scan();
+          setInterval(scan, 2000);
+          // Filet de sécurité : certains players ne lèvent pas 'ended'.
+          // On considère "fini" si on est à < 0,7 s de la fin d'une vidéo
+          // assez longue dont la lecture a réellement progressé.
+          setInterval(function() {
+            try {
+              var vids = document.querySelectorAll('video');
+              for (var i = 0; i < vids.length; i++) {
+                var v = vids[i];
+                if (v.ended) { fire(); return; }
+                if (v.duration && isFinite(v.duration) && v.duration > 60 &&
+                    v.currentTime > 5 && (v.duration - v.currentTime) < 0.7) {
+                  fire(); return;
+                }
+              }
+            } catch(e){}
+          }, 1000);
+          try {
+            new MutationObserver(scan)
+              .observe(document.documentElement, { childList: true, subtree: true });
+          } catch(e){}
         })();
     """.trimIndent()
 }

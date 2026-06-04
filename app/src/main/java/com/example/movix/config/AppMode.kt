@@ -36,6 +36,6 @@ object AppModeStore {
 
     fun label(mode: AppMode): String = when (mode) {
         AppMode.FILMS_SERIES -> "Films & Séries"
-        AppMode.ANIME        -> "Animé"
+        AppMode.ANIME        -> "Animés & Dessins animés"
     }
 }

@@ -182,6 +182,44 @@ data class MovixCustomLinksTvEpisode(
     val links: List<String>? = null
 )
 
+// ─── Anime (anime-sama, proxifié par api.movix.cloud/anime/search) ─────────
+// GET /anime/search/{titre}?includeSeasons=true&includeEpisodes=true
+// Réponse = tableau de résultats triés par pertinence. Chaque résultat a des
+// saisons ("Saison 1", "Film"…), chaque saison des épisodes, chaque épisode
+// des streaming_links groupés par langue (vf / vostfr) avec une liste de
+// players (embeds Vidmoly / Sibnet / Sendvid…).
+@JsonClass(generateAdapter = true)
+data class AnimeSearchResult(
+    val url: String? = null,
+    val name: String? = null,
+    val image: String? = null,
+    @Json(name = "alternative_names") val alternativeNames: List<String>? = null,
+    @Json(name = "alternative_names_string") val alternativeNamesString: String? = null,
+    val seasons: List<AnimeSeasonData>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AnimeSeasonData(
+    val name: String? = null,
+    @Json(name = "episodeCount") val episodeCount: Int? = null,
+    val episodes: List<AnimeEpisodeData>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AnimeEpisodeData(
+    val name: String? = null,
+    @Json(name = "serie_name") val serieName: String? = null,
+    @Json(name = "season_name") val seasonName: String? = null,
+    val index: Int? = null,
+    @Json(name = "streaming_links") val streamingLinks: List<AnimeStreamingLink>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class AnimeStreamingLink(
+    val language: String? = null,
+    val players: List<String>? = null
+)
+
 @JsonClass(generateAdapter = true)
 data class MovixSearchResponse(
     val results: List<MovixSearchItem> = emptyList(),

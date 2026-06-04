@@ -60,6 +60,13 @@ class PlaybackVideoFragment : VideoSupportFragment() {
                     Toast.LENGTH_LONG
                 ).show()
             }
+            override fun onPlaybackStateChanged(playbackState: Int) {
+                // Vraie fin de lecture (≠ pause) → délègue à l'activité qui
+                // lance le décompte vers l'épisode suivant.
+                if (playbackState == Player.STATE_ENDED) {
+                    (activity as? PlaybackActivity)?.onPlaybackEnded()
+                }
+            }
         })
 
         val adapter = LeanbackPlayerAdapter(requireContext(), exo, UPDATE_DELAY)
