@@ -28,9 +28,8 @@ object MirrorResolver {
 
     // Hôtes de fallback si l'auto-détection échoue (à essayer dans l'ordre).
     val FALLBACK_HOSTS = listOf(
-        "api.movix.cloud",
-        "api.movix.tax",
-        "api.movix.health"
+        "api.movix.golf",
+        "api.movix.cloud"
     )
 
     private val TITLE_RX = """<title>[^<]*\|\s*(movix\.[a-z0-9]+)""".toRegex(RegexOption.IGNORE_CASE)
