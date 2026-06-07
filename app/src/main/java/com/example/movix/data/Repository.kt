@@ -297,39 +297,25 @@ object Repository {
     }
 
     /**
-     * Détecte si une URL matche un host SeekStreaming connu (les patterns
-     * viennent de hosterRegistry.ts côté MovixOpenSource).
-     */
-    private fun isSeekStreaming(url: String): Boolean {
-        val u = url.lowercase()
-        return u.contains("embedseek") || u.contains("embed4me") || u.contains("seekstreaming")
-    }
-
-    /**
-     * Numérote les liens custom-links pour matcher l'affichage du site Movix :
-     * les URLs SeekStreaming sont labellisées "SeekStreaming 1..N", les autres
-     * conservent leur host comme nom.
+     * Numérote les liens custom-links comme le fait le site Movix.
+     *
+     * L'endpoint `api/links` EST le flux SeekStreaming : chaque lien est donc
+     * une source « SeekStreaming N », quel que soit le domaine d'embed. On ne
+     * filtre plus sur un whitelist d'hôtes (embedseek / seekstreaming…) car le
+     * provider tourne régulièrement ses domaines (seekplayer.me, bysebuho.com…),
+     * ce qui faisait disparaître les sources de certaines séries (ex. Euphoria).
      */
     private fun numberCustomLinks(urls: List<String>): List<MovixLink> {
         var seekIdx = 0
         return urls.mapNotNull { raw ->
             val url = raw.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-            if (isSeekStreaming(url)) {
-                seekIdx += 1
-                MovixLink(
-                    url = url,
-                    host = "SeekStreaming $seekIdx",
-                    language = "FR",
-                    category = "SeekStreaming"
-                )
-            } else {
-                MovixLink(
-                    url = url,
-                    host = hostOf(url),
-                    language = "FR",
-                    category = "Custom links"
-                )
-            }
+            seekIdx += 1
+            MovixLink(
+                url = url,
+                host = "SeekStreaming $seekIdx",
+                language = "FR",
+                category = "SeekStreaming"
+            )
         }
     }
 
