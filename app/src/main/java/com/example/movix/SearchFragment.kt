@@ -13,8 +13,6 @@ import androidx.leanback.widget.Presenter
 import androidx.leanback.widget.Row
 import androidx.leanback.widget.RowPresenter
 import androidx.lifecycle.lifecycleScope
-import com.example.movix.config.AppMode
-import com.example.movix.config.AppModeStore
 import com.example.movix.data.ApiConfig
 import com.example.movix.data.MovixSearchItem
 import com.example.movix.data.Repository
@@ -55,13 +53,13 @@ class SearchFragment : SearchSupportFragment(), SearchSupportFragment.SearchResu
         }
         searchJob = viewLifecycleOwner.lifecycleScope.launch {
             if (!immediate) delay(350)
-            val mode = AppModeStore.current(requireContext().applicationContext)
             showStatus("Recherche en cours pour \"$query\"…")
+            // Recherche unifiée : films, séries, animés et dessins animés en une
+            // seule passe — plus besoin de switcher de catégorie.
             val results = withContext(Dispatchers.IO) {
-                if (mode == AppMode.ANIME) Repository.searchAnimeTmdb(query)
-                else Repository.searchMovix(query)
+                Repository.searchAll(query)
             }
-            displayResults(query, results, mode)
+            displayResults(query, results)
         }
     }
 
@@ -73,22 +71,17 @@ class SearchFragment : SearchSupportFragment(), SearchSupportFragment.SearchResu
         rowsAdapter.add(ListRow(header, statusAdapter))
     }
 
-    private fun displayResults(query: String, items: List<MovixSearchItem>, mode: AppMode) {
+    private fun displayResults(query: String, items: List<MovixSearchItem>) {
         rowsAdapter.clear()
         val movies = items.mapNotNull { toMovie(it) }
         if (movies.isEmpty()) {
-            val emptyMessage = if (mode == AppMode.ANIME)
-                "Aucun animé trouvé pour \"$query\". Essaie un autre titre."
-            else
-                "Aucun résultat pour \"$query\". Vérifie l'orthographe ou essaie un mot clé différent."
-            showStatus(emptyMessage)
+            showStatus("Aucun résultat pour \"$query\". Vérifie l'orthographe ou essaie un mot clé différent.")
             return
         }
         val cardPresenter = CardPresenter()
         val rowAdapter = ArrayObjectAdapter(cardPresenter)
         movies.forEach(rowAdapter::add)
-        val modeTag = if (mode == AppMode.ANIME) " (Animé)" else ""
-        val header = HeaderItem(0, "Résultats pour \"$query\"$modeTag — ${movies.size}")
+        val header = HeaderItem(0, "Résultats pour \"$query\" — ${movies.size}")
         rowsAdapter.add(ListRow(header, rowAdapter))
     }
 

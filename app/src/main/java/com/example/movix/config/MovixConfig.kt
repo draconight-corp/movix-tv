@@ -12,8 +12,8 @@ import android.content.Context
  */
 object MovixConfig {
 
-    const val DEFAULT_API_HOST = "api.movix.golf"
-    const val DEFAULT_SITE_HOST = "movix.golf"
+    const val DEFAULT_API_HOST = "api.movix.chat"
+    const val DEFAULT_SITE_HOST = "movix.chat"
     private const val PREFS = "movix_config"
     private const val KEY_OVERRIDE = "api_host_override"
     private const val KEY_RESOLVED = "api_host_resolved"
@@ -60,12 +60,5 @@ object MovixConfig {
             .putString(KEY_RESOLVED, host)
             .putLong(KEY_RESOLVED_AT, System.currentTimeMillis())
             .apply()
-    }
-
-    private const val KEY_FILTER_DEAD = "filter_dead_links"
-    fun isDeadLinkFilterEnabled(ctx: Context): Boolean =
-        ctx.getSharedPreferences(PREFS, 0).getBoolean(KEY_FILTER_DEAD, true)
-    fun setDeadLinkFilterEnabled(ctx: Context, enabled: Boolean) {
-        ctx.getSharedPreferences(PREFS, 0).edit().putBoolean(KEY_FILTER_DEAD, enabled).apply()
     }
 }

@@ -187,6 +187,34 @@ object Repository {
     }.getOrDefault(emptyList())
 
     /**
+     * Recherche unifiée, toutes catégories confondues : films, séries, animés
+     * ET dessins animés, sans avoir à changer de mode. On interroge en parallèle
+     * le catalogue Movix (api/search) et TMDB search/multi, puis on fusionne en
+     * dédupliquant par tmdb_id (les entrées Movix priment, elles portent les
+     * métadonnées du catalogue).
+     */
+    suspend fun searchAll(query: String): List<MovixSearchItem> = coroutineScope {
+        val movixDeferred = async { searchMovix(query) }
+        val tmdbDeferred = async { searchTmdbMulti(query) }
+        val combined = movixDeferred.await() + tmdbDeferred.await()
+        val seen = HashSet<Long>()
+        combined.filter { item ->
+            val id = item.resolvedTmdbId() ?: return@filter true
+            seen.add(id) // false si déjà vu → filtré
+        }
+    }
+
+    /**
+     * TMDB search/multi non filtré : renvoie films + séries (animés et dessins
+     * animés inclus, car ils sont taggés movie/tv côté TMDB).
+     */
+    suspend fun searchTmdbMulti(query: String): List<MovixSearchItem> = runCatching {
+        ApiClient.tmdb.searchMulti(query = query).results
+            .filter { it.mediaType == "movie" || it.mediaType == "tv" }
+            .map { it.toMovixSearchItem() }
+    }.getOrDefault(emptyList())
+
+    /**
      * Recherche d'animation : utilise search/multi de TMDB puis garde tout ce qui
      * porte le genre 16 (Animation) — animés japonais ET dessins animés
      * occidentaux (Rick et Morty, BoJack…). On NE filtre PLUS sur l'origine

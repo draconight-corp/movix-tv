@@ -21,13 +21,12 @@ import androidx.lifecycle.lifecycleScope
 import com.bumptech.glide.Glide
 import com.bumptech.glide.request.target.CustomTarget
 import com.bumptech.glide.request.transition.Transition
-import com.example.movix.config.MovixConfig
 import com.example.movix.data.MovixLink
 import com.example.movix.data.Repository
 import com.example.movix.data.TmdbItem
-import com.example.movix.health.LinkHealthChecker
 import com.example.movix.history.WatchHistory
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -251,36 +250,33 @@ class VideoDetailsFragment : DetailsSupportFragment() {
 
     private fun resolveAndPlay(m: Movie, season: Int?, episode: Int?) {
         Toast.makeText(requireContext(), R.string.loading, Toast.LENGTH_SHORT).show()
-        val isAnimeMode = com.example.movix.config.AppModeStore.current(
-            requireContext().applicationContext
-        ) == com.example.movix.config.AppMode.ANIME
         lifecycleScope.launch {
-            val raw = runCatching {
+            val links = runCatching {
                 withContext(Dispatchers.IO) {
-                    // En mode Animé, les sources viennent d'anime-sama (recherche
-                    // par titre) ; on ne retombe sur les providers TMDB que si
-                    // l'animé n'est pas trouvé.
-                    val anime = if (isAnimeMode && !m.title.isNullOrBlank())
-                        Repository.resolveAnimeSources(m.title!!, season, episode)
-                    else emptyList()
-                    if (anime.isNotEmpty()) anime
-                    else Repository.aggregateAllSources(m.tmdbId, m.isTv, season, episode)
+                    // Recherche unifiée des sources : on interroge anime-sama
+                    // (par titre) ET les providers TMDB en parallèle, puis on
+                    // fusionne. anime-sama renvoie une liste vide pour les titres
+                    // non-animés, donc c'est sans effet pour films/séries.
+                    // Plus de dépendance au mode Animé : peu importe la catégorie
+                    // dans laquelle le titre a été trouvé, on récupère tout.
+                    val animeDeferred = async {
+                        if (!m.title.isNullOrBlank())
+                            runCatching {
+                                Repository.resolveAnimeSources(m.title!!, season, episode)
+                            }.getOrDefault(emptyList())
+                        else emptyList()
+                    }
+                    val tmdbDeferred = async {
+                        runCatching {
+                            Repository.aggregateAllSources(m.tmdbId, m.isTv, season, episode)
+                        }.getOrDefault(emptyList())
+                    }
+                    animeDeferred.await() + tmdbDeferred.await()
                 }
             }.getOrDefault(emptyList())
-            if (raw.isEmpty()) {
+            if (links.isEmpty()) {
                 Toast.makeText(requireContext(), R.string.no_sources, Toast.LENGTH_LONG).show()
                 return@launch
-            }
-
-            val filterDead = MovixConfig.isDeadLinkFilterEnabled(requireContext().applicationContext)
-            val (links, deadCount) = if (filterDead && raw.size > 1) {
-                Toast.makeText(requireContext(), "Vérification de ${raw.size} sources…", Toast.LENGTH_SHORT).show()
-                val result = withContext(Dispatchers.IO) { LinkHealthChecker.classify(raw) }
-                // Fail-open si tout est marqué mort
-                val alives = if (result.alives.isEmpty()) raw else result.alives
-                alives to result.deads.size
-            } else {
-                raw to 0
             }
 
             WatchHistory.record(requireContext().applicationContext, m, season, episode)
@@ -292,7 +288,6 @@ class VideoDetailsFragment : DetailsSupportFragment() {
             val grouped = links.groupBy { it.category }
             val title = buildString {
                 append("Sources (${links.size}) — ${grouped.size} catégorie(s)")
-                if (deadCount > 0) append(" • ${deadCount} mortes filtrées")
                 if (isSpiderNoir(m)) append("\nℹ️ Version noir & blanc dispo dans Seekstreaming 4")
             }
             val flatLabels = links.map { "[${it.category}]  ${it.displayName()}" }.toTypedArray()
