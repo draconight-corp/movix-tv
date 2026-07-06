@@ -348,7 +348,7 @@ object Repository {
     }
 
     private fun parseCustomMovieLinks(resp: MovixCustomLinksMovieResponse?): List<MovixLink> {
-        val urls = resp?.data?.links.orEmpty()
+        val urls = resp?.data?.links.orEmpty().mapNotNull { it.url?.takeIf(String::isNotBlank) }
         return numberCustomLinks(urls)
     }
 
@@ -361,7 +361,8 @@ object Repository {
         val ep = resp.data.firstOrNull {
             it.seasonNumber == season && it.episodeNumber == episode
         } ?: return emptyList()
-        return numberCustomLinks(ep.links.orEmpty())
+        val urls = ep.links.orEmpty().mapNotNull { it.url?.takeIf(String::isNotBlank) }
+        return numberCustomLinks(urls)
     }
 
     /**

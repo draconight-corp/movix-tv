@@ -16,7 +16,10 @@ import java.util.concurrent.TimeUnit
 object ApiClient {
 
     private val moshi: Moshi by lazy {
-        Moshi.Builder().add(KotlinJsonAdapterFactory()).build()
+        Moshi.Builder()
+            .add(FlexLinkAdapter())
+            .add(KotlinJsonAdapterFactory())
+            .build()
     }
 
     /**

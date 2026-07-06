@@ -1,7 +1,11 @@
 package com.example.movix.data
 
+import com.squareup.moshi.FromJson
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
+import com.squareup.moshi.JsonReader
+import com.squareup.moshi.JsonWriter
+import com.squareup.moshi.ToJson
 
 /**
  * Schéma réel de https://api.movix.tax/api/tmdb/{type}/{id}[?season=N&episode=N]
@@ -163,7 +167,7 @@ data class MovixCustomLinksMovieResponse(
 @JsonClass(generateAdapter = true)
 data class MovixCustomLinksMovieData(
     val id: String? = null,
-    val links: List<String>? = null
+    val links: List<FlexLink>? = null
 )
 
 // Séries : {success, type:"tv", data:[{id, series_id, season_number, episode_number, links:[]}, ...]}
@@ -179,8 +183,44 @@ data class MovixCustomLinksTvEpisode(
     @Json(name = "series_id") val seriesId: String? = null,
     @Json(name = "season_number") val seasonNumber: Int? = null,
     @Json(name = "episode_number") val episodeNumber: Int? = null,
-    val links: List<String>? = null
+    val links: List<FlexLink>? = null
 )
+
+/**
+ * Un lien custom (SeekStreaming). L'API `api/links/...` renvoie tantôt une
+ * simple chaîne (ancien format), tantôt un objet `{ "url": ..., "added_at": ... }`
+ * (nouveau format), et parfois les DEUX mélangés dans le même tableau.
+ * [FlexLinkAdapter] absorbe les deux et n'expose que l'URL, pour que le parsing
+ * ne casse plus quand le provider fait évoluer son schéma.
+ */
+data class FlexLink(val url: String? = null)
+
+class FlexLinkAdapter {
+    @FromJson
+    fun fromJson(reader: JsonReader): FlexLink? = when (reader.peek()) {
+        JsonReader.Token.STRING -> FlexLink(reader.nextString())
+        JsonReader.Token.BEGIN_OBJECT -> {
+            var url: String? = null
+            reader.beginObject()
+            while (reader.hasNext()) {
+                if (reader.nextName() == "url" && reader.peek() != JsonReader.Token.NULL) {
+                    url = reader.nextString()
+                } else {
+                    reader.skipValue()
+                }
+            }
+            reader.endObject()
+            FlexLink(url)
+        }
+        JsonReader.Token.NULL -> reader.nextNull()
+        else -> { reader.skipValue(); FlexLink(null) }
+    }
+
+    @ToJson
+    fun toJson(writer: JsonWriter, value: FlexLink?) {
+        writer.value(value?.url)
+    }
+}
 
 // ─── Anime (anime-sama, proxifié par api.movix.cloud/anime/search) ─────────
 // GET /anime/search/{titre}?includeSeasons=true&includeEpisodes=true
