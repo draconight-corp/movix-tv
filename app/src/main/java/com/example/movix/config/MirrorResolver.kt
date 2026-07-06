@@ -28,6 +28,7 @@ object MirrorResolver {
 
     // Hôtes de fallback si l'auto-détection échoue (à essayer dans l'ordre).
     val FALLBACK_HOSTS = listOf(
+        "api.movix.date",
         "api.movix.chat",
         "api.movix.golf",
         "api.movix.cloud"
