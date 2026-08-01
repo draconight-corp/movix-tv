@@ -100,14 +100,14 @@ object SettingsDialog {
     private fun askManual(ctx: Context) {
         val input = EditText(ctx).apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-            hint = "api.movix.show"
+            hint = "api.movix.fun"
             setText(MovixConfig.manualOverride(ctx) ?: MovixConfig.currentApiHost(ctx))
         }
         val container = LinearLayout(ctx).apply {
             setPadding(48, 24, 48, 24)
             orientation = LinearLayout.VERTICAL
             val label = TextView(ctx).apply {
-                text = "Hôte API complet (ex: api.movix.show) :"
+                text = "Hôte API complet (ex: api.movix.fun) :"
                 setTextColor(0xFFFFFFFF.toInt())
                 setPadding(0, 0, 0, 16)
             }
