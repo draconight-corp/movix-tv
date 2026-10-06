@@ -23,6 +23,10 @@ Pensée pour la **télécommande** Fire TV / Android TV : navigation case-par-ca
 | Sources stream | API publique Movix `https://api.movix.luxe` |
 | TV en direct | `/api/livetv/*` (Vavoo HLS natif, Northlive / Streamed en lecteur web verrouillé) |
 
+## Téléphone
+
+La même APK s'installe aussi sur téléphone : elle ouvre alors une UI tactile (Jetpack Compose, package `mobile/`) avec onglets Accueil, Recherche, Direct et Historique. Les sources, le lecteur web verrouillé anti-pop-up, l'historique et la mise à jour auto sont partagés avec l'UI TV (`PlayerLauncher`, `LiveTv`).
+
 ## Architecture
 
 ```

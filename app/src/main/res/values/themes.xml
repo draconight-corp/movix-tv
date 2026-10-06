@@ -12,6 +12,13 @@
         <item name="android:windowBackground">@color/movix_dark</item>
     </style>
 
+    <!-- Téléphone : l'UI est en Compose, thème Material sans barre d'action -->
+    <style name="Theme.Movix.Mobile" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/movix_dark</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/movix_dark</item>
+    </style>
+
     <style name="MovixDialog" parent="@android:style/Theme.Material.Dialog.Alert">
         <item name="android:colorBackground">@color/movix_dark</item>
         <item name="android:textColorPrimary">#ffffff</item>

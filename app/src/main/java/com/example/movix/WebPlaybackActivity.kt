@@ -57,6 +57,8 @@ class WebPlaybackActivity : FragmentActivity() {
     private val allowedDomains: MutableSet<String> = ConcurrentHashMap.newKeySet()
     @Volatile private var initialLoad = true
     private var currentPlayerUrl: String? = null
+    // Dernière page principale autorisée (lue depuis le thread réseau)
+    @Volatile private var currentPageUrl: String? = null
 
     private var backLongPressFired = false
     private var okLongPressFired = false
@@ -127,8 +129,12 @@ class WebPlaybackActivity : FragmentActivity() {
 
     private fun showFirstTimeHints() {
         val hints = mutableListOf<String>()
-        if (urls.size > 1) hints += "Maintiens RETOUR pour changer de source"
-        hints += "Maintiens OK pour activer le curseur"
+        if (PlayerLauncher.isTv(this)) {
+            if (urls.size > 1) hints += "Maintiens RETOUR pour changer de source"
+            hints += "Maintiens OK pour activer le curseur"
+        } else {
+            hints += "Touche RETOUR : options (source, épisode suivant, quitter)"
+        }
         Toast.makeText(this, hints.joinToString(" • "), Toast.LENGTH_LONG).show()
     }
 
@@ -219,6 +225,7 @@ class WebPlaybackActivity : FragmentActivity() {
     /** Charge une source et réinitialise le verrou de navigation sur son domaine. */
     private fun loadPlayer(url: String) {
         currentPlayerUrl = url
+        currentPageUrl = url
         allowedDomains.clear()
         hostOf(url)?.let { allowedDomains += AdBlocker.baseDomain(it) }
         initialLoad = true
@@ -227,21 +234,37 @@ class WebPlaybackActivity : FragmentActivity() {
     }
 
     /**
-     * Navigation de la page principale autorisée ? Oui si même domaine que le
-     * lecteur, ou si c'est une redirection HTTP pendant le chargement initial
-     * (ex : uqload.cx → uqload.net), auquel cas le nouveau domaine est ajouté.
+     * Navigation de la page principale autorisée ? Oui si :
+     *  - même domaine que le lecteur ;
+     *  - redirection HTTP pendant le chargement initial (uqload.cx → uqload.net) ;
+     *  - domaine miroir qui garde le MÊME chemin de vidéo (Voe redirige en JS
+     *    voe.sx/e/abc123 → domaine-aléatoire.com/e/abc123). Une pub ne
+     *    reprend jamais l'identifiant de la vidéo, donc ça reste refusé.
+     * Le nouveau domaine est alors ajouté aux domaines autorisés.
      */
     private fun isAllowedMainFrame(url: String, isRedirect: Boolean): Boolean {
         val host = hostOf(url) ?: return false
         if (AdBlocker.isAdultHost(host)) return false
         val domain = AdBlocker.baseDomain(host)
-        if (domain in allowedDomains) return true
-        if (isRedirect && initialLoad) {
+        if (domain in allowedDomains) {
+            currentPageUrl = url
+            return true
+        }
+        if ((isRedirect && initialLoad) || isSameVideoPath(url, currentPageUrl)) {
             allowedDomains += domain
+            currentPageUrl = url
             return true
         }
         Log.w(TAG, "Navigation hors lecteur refusée : $url")
         return false
+    }
+
+    private fun isSameVideoPath(target: String, current: String?): Boolean {
+        if (current == null) return false
+        val a = runCatching { java.net.URI(target).path }.getOrNull()?.trimEnd('/') ?: return false
+        val b = runCatching { java.net.URI(current).path }.getOrNull()?.trimEnd('/') ?: return false
+        // Chemin non trivial (au moins un identifiant de 6+ caractères)
+        return a == b && a.substringAfterLast('/').length >= 6
     }
 
     private fun hostOf(url: String): String? =
@@ -540,8 +563,8 @@ class WebPlaybackActivity : FragmentActivity() {
 
             val firstUrl = newUrls.firstOrNull() ?: return@launch
             // Si la nouvelle source n'est pas un embed HTML, on bascule sur PlaybackActivity
-            if (isDirectStream(firstUrl)) {
-                val intent = Intent(this@WebPlaybackActivity, PlaybackActivity::class.java).apply {
+            if (PlayerLauncher.isDirectStream(firstUrl)) {
+                val intent = Intent(this@WebPlaybackActivity, PlayerLauncher.directPlayerClass(this@WebPlaybackActivity)).apply {
                     putExtra(PlaybackActivity.EXTRA_URL, firstUrl)
                     putExtra(PlaybackActivity.EXTRA_TITLE, movieTitle)
                     putStringArrayListExtra(PlaybackActivity.EXTRA_URLS, newUrls)
@@ -565,13 +588,6 @@ class WebPlaybackActivity : FragmentActivity() {
                 loadPlayer(firstUrl)
             }
         }
-    }
-
-    private fun isDirectStream(url: String): Boolean {
-        val lower = url.lowercase()
-        return lower.contains(".m3u8") || lower.contains(".mpd") ||
-                lower.endsWith(".mp4") || lower.endsWith(".webm") ||
-                lower.endsWith(".mkv")
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────────

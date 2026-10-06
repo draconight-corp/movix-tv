@@ -1,6 +1,7 @@
 package com.example.movix
 
 import com.example.movix.data.ApiConfig
+import com.example.movix.data.MovixSearchItem
 import com.example.movix.data.TmdbItem
 import java.io.Serializable
 
@@ -36,5 +37,21 @@ data class Movie(
             year = item.displayDate?.take(4),
             rating = item.voteAverage
         )
+
+        /** Résultat de recherche (Movix ou TMDB) → Movie ; null sans id TMDB. */
+        fun fromSearch(item: MovixSearchItem): Movie? {
+            val tmdb = item.resolvedTmdbId() ?: return null
+            return Movie(
+                id = tmdb,
+                tmdbId = tmdb,
+                isTv = item.isTv(),
+                title = item.displayTitle(),
+                description = item.overview,
+                backgroundImageUrl = ApiConfig.backdropUrl(item.posterPath),
+                cardImageUrl = item.posterUrl(),
+                year = (item.releaseDate ?: item.firstAirDate)?.take(4),
+                rating = item.voteAverage
+            )
+        }
     }
 }

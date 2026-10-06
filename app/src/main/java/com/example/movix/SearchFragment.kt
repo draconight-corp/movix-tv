@@ -13,7 +13,6 @@ import androidx.leanback.widget.Presenter
 import androidx.leanback.widget.Row
 import androidx.leanback.widget.RowPresenter
 import androidx.lifecycle.lifecycleScope
-import com.example.movix.data.ApiConfig
 import com.example.movix.data.MovixSearchItem
 import com.example.movix.data.Repository
 import kotlinx.coroutines.Dispatchers
@@ -85,20 +84,7 @@ class SearchFragment : SearchSupportFragment(), SearchSupportFragment.SearchResu
         rowsAdapter.add(ListRow(header, rowAdapter))
     }
 
-    private fun toMovie(item: MovixSearchItem): Movie? {
-        val tmdb = item.resolvedTmdbId() ?: return null
-        return Movie(
-            id = tmdb,
-            tmdbId = tmdb,
-            isTv = item.isTv(),
-            title = item.displayTitle(),
-            description = item.overview,
-            backgroundImageUrl = ApiConfig.backdropUrl(item.posterPath),
-            cardImageUrl = item.posterUrl(),
-            year = (item.releaseDate ?: item.firstAirDate)?.take(4),
-            rating = item.voteAverage
-        )
-    }
+    private fun toMovie(item: MovixSearchItem): Movie? = Movie.fromSearch(item)
 
     private inner class ClickListener : OnItemViewClickedListener {
         override fun onItemClicked(

@@ -26,7 +26,6 @@ import com.example.movix.data.Repository
 import com.example.movix.data.TmdbItem
 import com.example.movix.history.WatchHistory
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -251,29 +250,7 @@ class VideoDetailsFragment : DetailsSupportFragment() {
     private fun resolveAndPlay(m: Movie, season: Int?, episode: Int?) {
         Toast.makeText(requireContext(), R.string.loading, Toast.LENGTH_SHORT).show()
         lifecycleScope.launch {
-            val links = runCatching {
-                withContext(Dispatchers.IO) {
-                    // Recherche unifiée des sources : on interroge anime-sama
-                    // (par titre) ET les providers TMDB en parallèle, puis on
-                    // fusionne. anime-sama renvoie une liste vide pour les titres
-                    // non-animés, donc c'est sans effet pour films/séries.
-                    // Plus de dépendance au mode Animé : peu importe la catégorie
-                    // dans laquelle le titre a été trouvé, on récupère tout.
-                    val animeDeferred = async {
-                        if (!m.title.isNullOrBlank())
-                            runCatching {
-                                Repository.resolveAnimeSources(m.title!!, season, episode)
-                            }.getOrDefault(emptyList())
-                        else emptyList()
-                    }
-                    val tmdbDeferred = async {
-                        runCatching {
-                            Repository.aggregateAllSources(m.tmdbId, m.isTv, season, episode)
-                        }.getOrDefault(emptyList())
-                    }
-                    animeDeferred.await() + tmdbDeferred.await()
-                }
-            }.getOrDefault(emptyList())
+            val links = PlayerLauncher.resolveSources(m, season, episode)
             if (links.isEmpty()) {
                 Toast.makeText(requireContext(), R.string.no_sources, Toast.LENGTH_LONG).show()
                 return@launch
@@ -290,7 +267,7 @@ class VideoDetailsFragment : DetailsSupportFragment() {
                 append("Sources (${links.size}) — ${grouped.size} catégorie(s)")
                 if (isSpiderNoir(m)) append("\nℹ️ Version noir & blanc dispo dans Seekstreaming 4")
             }
-            val flatLabels = links.map { "[${it.category}]  ${it.displayName()}" }.toTypedArray()
+            val flatLabels = links.map(PlayerLauncher::sourceLabel).toTypedArray()
             AlertDialog.Builder(requireContext(), R.style.MovixDialog)
                 .setTitle(title)
                 .setItems(flatLabels) { _, idx -> launchPlayer(m, links, idx, season, episode) }
@@ -306,41 +283,8 @@ class VideoDetailsFragment : DetailsSupportFragment() {
         season: Int?,
         episode: Int?
     ) {
-        val link = links.getOrNull(selectedIdx) ?: return
-        val url = link.bestUrl()
-        val urls = ArrayList(links.map { it.bestUrl() })
-        val labels = ArrayList(links.map { "[${it.category}] ${it.displayName()}" })
-
-        val intent = if (isDirectStream(url)) {
-            Intent(requireActivity(), PlaybackActivity::class.java).apply {
-                putExtra(PlaybackActivity.EXTRA_URL, url)
-                putExtra(PlaybackActivity.EXTRA_TITLE, m.title)
-                putExtra(PlaybackActivity.EXTRA_DESCRIPTION, m.description)
-                putStringArrayListExtra(PlaybackActivity.EXTRA_URLS, urls)
-                putStringArrayListExtra(PlaybackActivity.EXTRA_LABELS, labels)
-                putExtra(PlaybackActivity.EXTRA_INDEX, selectedIdx)
-                putExtra(PlaybackActivity.EXTRA_TMDB_ID, m.tmdbId)
-                putExtra(PlaybackActivity.EXTRA_IS_TV, m.isTv)
-                if (season != null) putExtra(PlaybackActivity.EXTRA_SEASON, season)
-                if (episode != null) putExtra(PlaybackActivity.EXTRA_EPISODE, episode)
-                putExtra(PlaybackActivity.EXTRA_POSTER, m.cardImageUrl)
-                putExtra(PlaybackActivity.EXTRA_BACKDROP, m.backgroundImageUrl)
-            }
-        } else {
-            Intent(requireActivity(), WebPlaybackActivity::class.java).apply {
-                putExtra(WebPlaybackActivity.EXTRA_URL, url)
-                putExtra(WebPlaybackActivity.EXTRA_TITLE, m.title)
-                putStringArrayListExtra(WebPlaybackActivity.EXTRA_URLS, urls)
-                putStringArrayListExtra(WebPlaybackActivity.EXTRA_LABELS, labels)
-                putExtra(WebPlaybackActivity.EXTRA_INDEX, selectedIdx)
-                putExtra(WebPlaybackActivity.EXTRA_TMDB_ID, m.tmdbId)
-                putExtra(WebPlaybackActivity.EXTRA_IS_TV, m.isTv)
-                if (season != null) putExtra(WebPlaybackActivity.EXTRA_SEASON, season)
-                if (episode != null) putExtra(WebPlaybackActivity.EXTRA_EPISODE, episode)
-                putExtra(WebPlaybackActivity.EXTRA_POSTER, m.cardImageUrl)
-                putExtra(WebPlaybackActivity.EXTRA_BACKDROP, m.backgroundImageUrl)
-            }
-        }
+        if (selectedIdx !in links.indices) return
+        val intent = PlayerLauncher.intentFor(requireContext(), m, links, selectedIdx, season, episode)
         startActivity(intent)
     }
 
@@ -356,13 +300,6 @@ class VideoDetailsFragment : DetailsSupportFragment() {
             .replace(Regex("\\s+"), " ")
             .trim()
         return t.contains("spider noir") || t.contains("spidernoir")
-    }
-
-    private fun isDirectStream(url: String): Boolean {
-        val lower = url.lowercase()
-        return lower.contains(".m3u8") || lower.contains(".mpd") ||
-                lower.endsWith(".mp4") || lower.endsWith(".webm") ||
-                lower.endsWith(".mkv")
     }
 
     private fun dpToPx(context: Context, dp: Int): Int {
