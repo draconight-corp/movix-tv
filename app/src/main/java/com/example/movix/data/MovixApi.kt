@@ -60,4 +60,14 @@ interface MovixApi {
 
     @GET("api/links/tv/{id}")
     suspend fun customLinksTv(@Path("id") tmdbId: Long): MovixCustomLinksTvResponse
+
+    // ─── TV en direct (page /live-tv du site) ──────────────────────────────
+    @GET("api/livetv/manifest")
+    suspend fun liveTvManifest(): LiveTvManifest
+
+    @GET("api/livetv/catalog/tv/{catalog}")
+    suspend fun liveTvCatalog(@Path("catalog") catalogId: String): LiveTvCatalogResponse
+
+    @GET("api/livetv/stream/tv/{id}")
+    suspend fun liveTvStreams(@Path("id") channelId: String): LiveTvStreamsResponse
 }

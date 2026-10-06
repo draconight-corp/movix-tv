@@ -95,10 +95,36 @@ object AdBlocker {
         "playmogo.com", "fembed.com", "upvid.co", "vidoza.net", "uptostream.link"
     )
 
+    /**
+     * Fragments de nom d'hôte de sites adultes / cam : bloqués quoi qu'il
+     * arrive (requête, sous-frame ou navigation), même si un lecteur tente
+     * d'y rediriger.
+     */
+    private val ADULT_HOST_TOKENS: List<String> = listOf(
+        "porn", "xxx", "xvideos", "xnxx", "xhamster", "redtube", "youporn",
+        "tube8", "spankbang", "eporner", "beeg", "motherless", "hentai",
+        "chaturbate", "stripchat", "bongacams", "livejasmin", "camsoda",
+        "cam4", "myfreecams", "onlyfans", "fansly", "brazzers", "adultfriend",
+        "sexcam", "livesex", "sexchat", "dating", "milf", "nsfw", "erotic"
+    )
+
+    fun isAdultHost(host: String): Boolean {
+        val h = host.lowercase()
+        return ADULT_HOST_TOKENS.any { h.contains(it) }
+    }
+
+    /** "a.b.example.com" → "example.com" (suffisant pour comparer deux hôtes). */
+    fun baseDomain(host: String): String {
+        val parts = host.lowercase().trimEnd('.').split('.')
+        return if (parts.size <= 2) parts.joinToString(".") else parts.takeLast(2).joinToString(".")
+    }
+
     fun shouldBlock(url: String): Boolean {
         val parsed = runCatching { java.net.URI(url) }.getOrNull() ?: return false
         val host = parsed.host?.lowercase() ?: return false
         val path = parsed.path?.lowercase().orEmpty()
+
+        if (isAdultHost(host)) return true
 
         // Whitelist gagne toujours (player officiel)
         if (ALLOWED_HOSTS.any { host == it || host.endsWith(".$it") }) return false
@@ -127,6 +153,9 @@ object AdBlocker {
         (function() {
           try {
             // ── Popups / dialogs natifs ────────────────────────────────────
+            // (filet JS uniquement : le vrai verrou est natif, cf.
+            // WebPlaybackActivity — onCreateWindow refusé + navigation
+            // principale verrouillée sur l'hôte du lecteur.)
             window.open = function() { return null; };
             window.alert = function() {};
             window.confirm = function() { return true; };

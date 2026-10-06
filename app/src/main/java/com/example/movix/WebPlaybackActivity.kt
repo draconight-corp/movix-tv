@@ -4,9 +4,11 @@ import android.annotation.SuppressLint
 import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.os.CountDownTimer
 import android.os.SystemClock
+import android.util.Log
 import android.util.TypedValue
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -28,6 +30,7 @@ import com.example.movix.webfilter.AdBlocker
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.ConcurrentHashMap
 
 class WebPlaybackActivity : FragmentActivity() {
 
@@ -47,6 +50,13 @@ class WebPlaybackActivity : FragmentActivity() {
     private var movieTitle: String? = null
     private var posterUrl: String? = null
     private var backdropUrl: String? = null
+
+    // Verrou anti-pop-up : la page principale ne peut naviguer QUE vers le
+    // domaine du lecteur chargé (+ redirections HTTP du chargement initial).
+    // Tout le reste (redirection pub, site porno…) est refusé.
+    private val allowedDomains: MutableSet<String> = ConcurrentHashMap.newKeySet()
+    @Volatile private var initialLoad = true
+    private var currentPlayerUrl: String? = null
 
     private var backLongPressFired = false
     private var okLongPressFired = false
@@ -112,7 +122,7 @@ class WebPlaybackActivity : FragmentActivity() {
         setContentView(root)
 
         showFirstTimeHints()
-        webView.loadUrl(url)
+        loadPlayer(url)
     }
 
     private fun showFirstTimeHints() {
@@ -138,7 +148,10 @@ class WebPlaybackActivity : FragmentActivity() {
             userAgentString =
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-            setSupportMultipleWindows(false)
+            // true + onCreateWindow refusé = AUCUNE nouvelle fenêtre possible.
+            // (avec false, un window.open/target=_blank venu de l'iframe du
+            // lecteur remplaçait la page courante par le site pub.)
+            setSupportMultipleWindows(true)
             javaScriptCanOpenWindowsAutomatically = false
         }
         // Pont JS → natif : permet au script ENDED_DETECT_JS de signaler la
@@ -155,24 +168,43 @@ class WebPlaybackActivity : FragmentActivity() {
                 view: WebView, request: WebResourceRequest
             ): WebResourceResponse? {
                 val u = request.url.toString()
-                return if (AdBlocker.shouldBlock(u)) AdBlocker.emptyResponse() else null
+                if (AdBlocker.shouldBlock(u)) return AdBlocker.emptyResponse()
+                // Filet de sécurité : document principal hors domaine du lecteur
+                if (request.isForMainFrame && !isAllowedMainFrame(u, isRedirect = false)) {
+                    return AdBlocker.emptyResponse()
+                }
+                return null
             }
             override fun shouldOverrideUrlLoading(
                 view: WebView, request: WebResourceRequest
             ): Boolean {
                 val target = request.url.toString()
-                if (target.startsWith("intent:") || target.startsWith("market:") ||
-                    target.contains("play.google.com") || target.startsWith("mailto:") ||
-                    target.startsWith("tel:") || target.startsWith("sms:")) return true
+                if (!target.startsWith("http://") && !target.startsWith("https://")) return true
                 if (AdBlocker.shouldBlock(target)) return true
-                return false
+                if (!request.isForMainFrame) return false
+                val redirect = Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && request.isRedirect
+                return !isAllowedMainFrame(target, redirect)
+            }
+            @Deprecated("API < 24")
+            override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+                if (!url.startsWith("http://") && !url.startsWith("https://")) return true
+                if (AdBlocker.shouldBlock(url)) return true
+                return !isAllowedMainFrame(url, isRedirect = initialLoad)
             }
             override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
                 super.onPageStarted(view, url, favicon)
+                // Dernier rempart si une navigation a échappé aux hooks ci-dessus
+                if (url != null && url.startsWith("http") && !isAllowedMainFrame(url, isRedirect = false)) {
+                    Log.w(TAG, "Navigation bloquée : $url")
+                    view.stopLoading()
+                    if (view.canGoBack()) view.goBack() else currentPlayerUrl?.let { loadPlayer(it) }
+                    return
+                }
                 view.evaluateJavascript(AdBlocker.ANTI_POPUP_JS, null)
             }
             override fun onPageFinished(view: WebView, url: String?) {
                 super.onPageFinished(view, url)
+                if (url != null && isAllowedMainFrame(url, isRedirect = false)) initialLoad = false
                 view.evaluateJavascript(AdBlocker.ANTI_POPUP_JS, null)
                 view.evaluateJavascript(AdBlocker.FORCE_PLAY_JS, null)
                 // Détection de fin de lecture → épisode suivant (séries uniquement)
@@ -183,6 +215,37 @@ class WebPlaybackActivity : FragmentActivity() {
         isFocusableInTouchMode = true
         requestFocus()
     }
+
+    /** Charge une source et réinitialise le verrou de navigation sur son domaine. */
+    private fun loadPlayer(url: String) {
+        currentPlayerUrl = url
+        allowedDomains.clear()
+        hostOf(url)?.let { allowedDomains += AdBlocker.baseDomain(it) }
+        initialLoad = true
+        webView.stopLoading()
+        webView.loadUrl(url)
+    }
+
+    /**
+     * Navigation de la page principale autorisée ? Oui si même domaine que le
+     * lecteur, ou si c'est une redirection HTTP pendant le chargement initial
+     * (ex : uqload.cx → uqload.net), auquel cas le nouveau domaine est ajouté.
+     */
+    private fun isAllowedMainFrame(url: String, isRedirect: Boolean): Boolean {
+        val host = hostOf(url) ?: return false
+        if (AdBlocker.isAdultHost(host)) return false
+        val domain = AdBlocker.baseDomain(host)
+        if (domain in allowedDomains) return true
+        if (isRedirect && initialLoad) {
+            allowedDomains += domain
+            return true
+        }
+        Log.w(TAG, "Navigation hors lecteur refusée : $url")
+        return false
+    }
+
+    private fun hostOf(url: String): String? =
+        runCatching { java.net.URI(url).host?.lowercase() }.getOrNull()
 
     private fun createCursorView(): View {
         val v = View(this)
@@ -374,8 +437,7 @@ class WebPlaybackActivity : FragmentActivity() {
                 if (which == currentIndex) return@setSingleChoiceItems
                 currentIndex = which
                 val newUrl = urls.getOrNull(which) ?: return@setSingleChoiceItems
-                webView.stopLoading()
-                webView.loadUrl(newUrl)
+                loadPlayer(newUrl)
             }
             .setNegativeButton("Annuler", null)
             .show()
@@ -500,8 +562,7 @@ class WebPlaybackActivity : FragmentActivity() {
                     "S${"%02d".format(next.season)}E${"%02d".format(next.episode)} — chargement…",
                     Toast.LENGTH_SHORT
                 ).show()
-                webView.stopLoading()
-                webView.loadUrl(firstUrl)
+                loadPlayer(firstUrl)
             }
         }
     }
@@ -540,6 +601,8 @@ class WebPlaybackActivity : FragmentActivity() {
     }
 
     companion object {
+        private const val TAG = "WebPlayback"
+
         // Délai avant lancement automatique de l'épisode suivant en fin de lecture
         private const val NEXT_EP_COUNTDOWN_MS = 8_000L
 

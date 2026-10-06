@@ -68,6 +68,12 @@
             android:theme="@style/Theme.Movix" />
 
         <activity
+            android:name=".LiveTvActivity"
+            android:exported="false"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.Movix.Browse" />
+
+        <activity
             android:name=".BrowseErrorActivity"
             android:exported="false"
             android:screenOrientation="landscape" />

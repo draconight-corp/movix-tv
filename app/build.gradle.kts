@@ -14,8 +14,8 @@ android {
         applicationId = "com.example.movix"
         minSdk = 21
         targetSdk = 36
-        versionCode = 22
-        versionName = "0.1.21"
+        versionCode = 23
+        versionName = "0.1.22"
     }
 
     buildTypes {

@@ -20,7 +20,8 @@ Pensée pour la **télécommande** Fire TV / Android TV : navigation case-par-ca
 | Lecteur | **Media3 / ExoPlayer** + LeanbackPlayerAdapter (HLS, DASH, MP4) |
 | Réseau | Retrofit + OkHttp + Moshi + Coroutines |
 | Catalogue | TMDB (popular, trending, top rated, tv) |
-| Sources stream | API publique Movix `https://api.movix.fun` |
+| Sources stream | API publique Movix `https://api.movix.luxe` |
+| TV en direct | `/api/livetv/*` (Vavoo HLS natif, Northlive / Streamed en lecteur web verrouillé) |
 
 ## Architecture
 

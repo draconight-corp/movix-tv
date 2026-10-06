@@ -291,3 +291,57 @@ data class MovixSearchItem(
         if (it.startsWith("http")) it else "https://image.tmdb.org/t/p/w500$it"
     }
 }
+
+/**
+ * TV en direct — endpoints /api/livetv (même source que https://movix.luxe/live-tv).
+ *
+ * manifest : { catalogs: [{ id: "vavoo_france", name: "France", _free: true }, …] }
+ * catalog  : { metas: [{ id, name, poster, logo, description, _isLive, _timestamp }] }
+ * stream   : { streams: [{ title, url, _directPlay, _isEmbed }] }
+ *   - vavoo_*     → flux HLS directs (_directPlay)
+ *   - northlive_* / streamed_* → pages lecteur web (_isEmbed)
+ */
+@JsonClass(generateAdapter = true)
+data class LiveTvManifest(
+    val catalogs: List<LiveTvCatalog>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class LiveTvCatalog(
+    val id: String = "",
+    val name: String? = null,
+    @Json(name = "_emoji") val emoji: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class LiveTvCatalogResponse(
+    val metas: List<LiveTvChannel>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class LiveTvChannel(
+    val id: String = "",
+    val name: String? = null,
+    val poster: String? = null,
+    val logo: String? = null,
+    val description: String? = null,
+    @Json(name = "_isLive") val isLive: Boolean? = null,
+    @Json(name = "_timestamp") val timestamp: Long? = null
+) : java.io.Serializable
+
+@JsonClass(generateAdapter = true)
+data class LiveTvStreamsResponse(
+    val streams: List<LiveTvStream>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class LiveTvStream(
+    val title: String? = null,
+    val url: String? = null,
+    @Json(name = "_directPlay") val directPlay: Boolean? = null,
+    @Json(name = "_isEmbed") val isEmbed: Boolean? = null
+) {
+    /** Flux lisible par ExoPlayer (sinon : page web → WebPlaybackActivity). */
+    val isDirect: Boolean
+        get() = directPlay == true || (isEmbed != true && url.orEmpty().contains(".m3u8"))
+}

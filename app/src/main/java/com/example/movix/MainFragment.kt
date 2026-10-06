@@ -115,6 +115,7 @@ class MainFragment : BrowseSupportFragment() {
             val modeAdapter = ArrayObjectAdapter(ModeItemPresenter())
             modeAdapter.add(ModeItem(AppMode.FILMS_SERIES, mode == AppMode.FILMS_SERIES))
             modeAdapter.add(ModeItem(AppMode.ANIME, mode == AppMode.ANIME))
+            modeAdapter.add(LiveTvEntry)
             rowsAdapter.add(ListRow(HeaderItem(rowIndex++, "Mode"), modeAdapter))
 
             // ── Reprendre (historique), filtré au mode courant ──────────────
@@ -205,6 +206,7 @@ class MainFragment : BrowseSupportFragment() {
                 when (item) {
                     is Movie -> openDetails(item)
                     is ModeItem -> handleModeClick(item)
+                    is LiveTvEntry -> startActivity(Intent(requireActivity(), LiveTvActivity::class.java))
                     is String -> handleInfoAction(item)
                 }
             } catch (t: Throwable) {
@@ -352,6 +354,9 @@ class MainFragment : BrowseSupportFragment() {
     /** Item d'une rangée bascule de mode (Films & Séries / Animé). */
     private data class ModeItem(val mode: AppMode, val isActive: Boolean)
 
+    /** Raccourci vers l'écran TV en direct, dans la rangée Mode. */
+    private object LiveTvEntry
+
     private inner class ModeItemPresenter : Presenter() {
         override fun onCreateViewHolder(parent: ViewGroup): ViewHolder {
             val view = TextView(parent.context)
@@ -365,8 +370,13 @@ class MainFragment : BrowseSupportFragment() {
             return ViewHolder(view)
         }
         override fun onBindViewHolder(viewHolder: ViewHolder, item: Any?) {
-            val mi = item as ModeItem
             val tv = viewHolder.view as TextView
+            if (item is LiveTvEntry) {
+                tv.text = "📺 TV en direct"
+                tv.setBackgroundColor(0xFFC62828.toInt())
+                return
+            }
+            val mi = item as ModeItem
             val prefix = if (mi.isActive) "▶ " else ""
             tv.text = "$prefix${AppModeStore.label(mi.mode)}"
             val bgColor = if (mi.isActive) 0xFF4CAF50.toInt() else 0xFF222222.toInt()
