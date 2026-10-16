@@ -6,41 +6,39 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Détecte le domaine officiel courant de Movix en scrapant movix.health
- * (page de redirection maintenue par les opérateurs, qui annonce l'adresse
- * active dans son <title> et son JSON-LD).
+ * Détecte le domaine Movix actif, sans republier d'APK. Candidats, dans l'ordre :
+ *   1. movix.online — page officielle de redirection, qui annonce l'adresse
+ *      active à la fin de son <title> (« … | movix.dog »).
+ *   2. `domain.json` à la racine du repo GitHub (branche main) — secours éditable
+ *      à la main si movix.online tombe ou change de format.
+ *   3. Le dernier hôte résolu, le défaut et les fallbacks connus.
+ * Chaque candidat est vérifié par un vrai appel API avant d'être retenu.
  */
 object MirrorResolver {
 
     private const val TAG = "MirrorResolver"
-    private const val REDIRECTOR_URL = "https://movix.health"
+    private const val REDIRECTOR_URL = "https://movix.online"
+    private const val DOMAIN_FILE_URL =
+        "https://raw.githubusercontent.com/draconight-corp/movix-tv/main/domain.json"
 
-    // Domaines connus comme morts (listés sur la page de redirection elle-même).
-    private val DEAD_DOMAINS = setOf(
-        "movix.health",
-        "movix.help", "movix.llc", "movix.rodeo", "movix.blog",
-        "movix.club", "movix.website", "movix.site",
-        "movix.tax"
-    )
+    // Domaines à ne jamais retenir : redirecteurs et clones frauduleux
+    // (movix.online liste movix.bet & co comme faux sites qui imitent Movix).
+    private val BLOCKED_SITES = setOf("movix.online", "movix.health", "movix.bet")
+
+    private val TITLE_RX = """<title>[^<]*\|\s*(movix\.[a-z0-9]+)\s*</title>"""
+        .toRegex(RegexOption.IGNORE_CASE)
 
     // Hôtes de fallback si l'auto-détection échoue (à essayer dans l'ordre).
     val FALLBACK_HOSTS = listOf(
+        "api.movix.dog",
         "api.movix.luxe",
         "api.movix.fun",
-        "api.movix.show",
-        "api.movix.date",
-        "api.movix.chat",
-        "api.movix.golf",
-        "api.movix.cloud"
+        "api.movix.show"
     )
-
-    private val TITLE_RX = """<title>[^<]*\|\s*(movix\.[a-z0-9]+)""".toRegex(RegexOption.IGNORE_CASE)
-    private val LDJSON_URL_RX = """"url"\s*:\s*"https://(movix\.[a-z0-9]+)/?""""
-        .toRegex(RegexOption.IGNORE_CASE)
-    private val ANY_DOMAIN_RX = """movix\.[a-z0-9]+""".toRegex(RegexOption.IGNORE_CASE)
 
     private val resolverClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -50,45 +48,64 @@ object MirrorResolver {
     }
 
     /**
-     * Récupère movix.health, en extrait le domaine actif, persiste le résultat.
-     * Renvoie l'hôte API (préfixe api.) ou null si la détection échoue.
+     * Trouve l'hôte API actif, le persiste et le renvoie (null si aucun ne répond).
      */
     suspend fun resolve(ctx: Context): String? = withContext(Dispatchers.IO) {
-        val html = runCatching {
-            resolverClient.newCall(
-                Request.Builder()
-                    .url(REDIRECTOR_URL)
-                    .header("User-Agent", "Mozilla/5.0 (Android TV)")
-                    .header("Accept", "text/html")
-                    .build()
-            ).execute().use { it.body?.string() }
-        }.onFailure { Log.w(TAG, "Resolver fetch failed: ${it.message}") }.getOrNull()
-            ?: return@withContext null
+        val candidates = buildList {
+            fetchRedirectorHost()?.let { add(it) }
+            fetchRemoteHost()?.let { add(it) }
+            MovixConfig.lastResolved(ctx)?.let { add(it) }
+            add(MovixConfig.DEFAULT_API_HOST)
+            addAll(FALLBACK_HOSTS)
+        }.distinct().filter { it.removePrefix("api.") !in BLOCKED_SITES }
 
-        val frontHost = extractFrontHost(html) ?: return@withContext null
-        if (frontHost in DEAD_DOMAINS) {
-            Log.w(TAG, "Resolved $frontHost but it's in the dead list — ignoring")
+        val alive = candidates.firstOrNull { isAlive(it) }
+        if (alive == null) {
+            Log.w(TAG, "No Movix host answered among $candidates")
             return@withContext null
         }
-
-        val apiHost = "api.$frontHost"
-        MovixConfig.setResolved(ctx, apiHost)
-        Log.i(TAG, "Resolved current Movix host: $apiHost")
-        apiHost
+        MovixConfig.setResolved(ctx, alive)
+        Log.i(TAG, "Resolved current Movix host: $alive")
+        alive
     }
 
-    private fun extractFrontHost(html: String): String? {
-        // 1. <title>...| movix.xyz</title> — convention de la page
-        TITLE_RX.find(html)?.groupValues?.getOrNull(1)?.lowercase()?.let { return it }
-        // 2. JSON-LD "url": "https://movix.xyz/"
-        LDJSON_URL_RX.find(html)?.groupValues?.getOrNull(1)?.lowercase()
-            ?.takeIf { it !in DEAD_DOMAINS }?.let { return it }
-        // 3. Heuristique : domaine movix.XXX le plus mentionné, hors morts
-        val counts = ANY_DOMAIN_RX.findAll(html)
-            .map { it.value.lowercase() }
-            .filter { it !in DEAD_DOMAINS }
-            .groupingBy { it }
-            .eachCount()
-        return counts.maxByOrNull { it.value }?.key
-    }
+    /** Lit le domaine annoncé dans le <title> de movix.online. */
+    private fun fetchRedirectorHost(): String? = runCatching {
+        val html = resolverClient.newCall(
+            Request.Builder()
+                .url(REDIRECTOR_URL)
+                .header("User-Agent", "Mozilla/5.0 (Android TV)")
+                .header("Accept", "text/html")
+                .build()
+        ).execute().use { if (it.isSuccessful) it.body?.string() else null } ?: return null
+        TITLE_RX.find(html)?.groupValues?.get(1)?.lowercase()?.let { "api.$it" }
+    }.onFailure { Log.w(TAG, "Redirector fetch failed: ${it.message}") }.getOrNull()
+
+    /** Lit domain.json : {"api": "api.movix.xxx"} ou {"site": "movix.xxx"}. */
+    private fun fetchRemoteHost(): String? = runCatching {
+        val body = resolverClient.newCall(
+            Request.Builder().url(DOMAIN_FILE_URL).header("Cache-Control", "no-cache").build()
+        ).execute().use { if (it.isSuccessful) it.body?.string() else null } ?: return null
+        val json = JSONObject(body)
+        val api = json.optString("api").trim().lowercase()
+        val site = json.optString("site").trim().lowercase()
+        when {
+            api.isNotEmpty() -> api
+            site.isNotEmpty() -> "api.$site"
+            else -> null
+        }
+    }.onFailure { Log.w(TAG, "domain.json fetch failed: ${it.message}") }.getOrNull()
+
+    /** Un hôte est vivant s'il répond 200 à une recherche avec l'Origin du site associé. */
+    private fun isAlive(apiHost: String): Boolean = runCatching {
+        val site = apiHost.removePrefix("api.")
+        resolverClient.newCall(
+            Request.Builder()
+                .url("https://$apiHost/api/search?title=test")
+                .header("User-Agent", "Mozilla/5.0 (Android TV)")
+                .header("Origin", "https://$site")
+                .header("Referer", "https://$site/")
+                .build()
+        ).execute().use { it.isSuccessful }
+    }.getOrDefault(false)
 }

@@ -293,7 +293,7 @@ data class MovixSearchItem(
 }
 
 /**
- * TV en direct — endpoints /api/livetv (même source que https://movix.luxe/live-tv).
+ * TV en direct — endpoints /api/livetv (même source que https://movix.dog/live-tv).
  *
  * manifest : { catalogs: [{ id: "vavoo_france", name: "France", _free: true }, …] }
  * catalog  : { metas: [{ id, name, poster, logo, description, _isLive, _timestamp }] }

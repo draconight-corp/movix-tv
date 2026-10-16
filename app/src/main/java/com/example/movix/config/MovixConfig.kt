@@ -7,27 +7,22 @@ import android.content.Context
  *
  * Ordre de priorité pour la résolution :
  *   1. Override manuel (saisi dans les paramètres)
- *   2. Dernier hôte résolu automatiquement (TTL 6h)
+ *   2. Dernier hôte résolu automatiquement (vérifié vivant, voir MirrorResolver)
  *   3. Fallback hardcodé
  */
 object MovixConfig {
 
-    const val DEFAULT_API_HOST = "api.movix.luxe"
-    const val DEFAULT_SITE_HOST = "movix.luxe"
+    const val DEFAULT_API_HOST = "api.movix.dog"
+    const val DEFAULT_SITE_HOST = "movix.dog"
     private const val PREFS = "movix_config"
     private const val KEY_OVERRIDE = "api_host_override"
     private const val KEY_RESOLVED = "api_host_resolved"
     private const val KEY_RESOLVED_AT = "api_host_resolved_at"
-    private const val TTL_MS = 6L * 60 * 60 * 1000
 
     fun currentApiHost(ctx: Context): String {
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         p.getString(KEY_OVERRIDE, null)?.takeIf { it.isNotBlank() }?.let { return it }
-        val resolved = p.getString(KEY_RESOLVED, null)
-        val resolvedAt = p.getLong(KEY_RESOLVED_AT, 0L)
-        if (!resolved.isNullOrBlank() && System.currentTimeMillis() - resolvedAt < TTL_MS) {
-            return resolved
-        }
+        p.getString(KEY_RESOLVED, null)?.takeIf { it.isNotBlank() }?.let { return it }
         return DEFAULT_API_HOST
     }
 

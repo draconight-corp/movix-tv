@@ -9,7 +9,7 @@ import com.example.movix.data.LiveTvChannel
 
 /**
  * TV en direct — logique partagée TV / mobile (catalogues de
- * https://movix.luxe/live-tv).
+ * https://movix.dog/live-tv).
  *
  * Seuls les catalogues gratuits et lisibles sont gardés :
  *  - vavoo_*     : chaînes par pays, flux HLS directs → lecteur natif (aucune pub)
