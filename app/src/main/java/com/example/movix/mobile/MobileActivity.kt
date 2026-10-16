@@ -1,5 +1,10 @@
 package com.example.movix.mobile
 
+import android.app.UiModeManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.SystemBarStyle
@@ -8,6 +13,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
+import com.example.movix.MainActivity
 import com.example.movix.config.MirrorResolver
 import com.example.movix.update.UpdateManager
 import kotlinx.coroutines.delay
@@ -16,12 +22,22 @@ import kotlinx.coroutines.launch
 /**
  * Point d'entrée sur téléphone / tablette (catégorie LAUNCHER). Sur TV,
  * c'est MainActivity (LEANBACK_LAUNCHER) qui s'ouvre avec l'UI télécommande.
+ *
+ * Certains chemins lancent quand même l'entrée LAUNCHER sur une TV (bouton
+ * « Ouvrir » de l'installeur après une mise à jour OTA, launchers de box non
+ * Android TV) : on redirige alors immédiatement vers l'UI TV.
  */
 class MobileActivity : FragmentActivity() {
 
     private val vm: MobileViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        if (isTelevision(this)) {
+            super.onCreate(savedInstanceState)
+            startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            finish()
+            return
+        }
         // Icônes de barre d'état claires : l'UI est toujours sombre
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -47,5 +63,15 @@ class MobileActivity : FragmentActivity() {
         super.onResume()
         // L'historique a pu changer pendant la lecture
         vm.refreshHistory()
+    }
+
+    companion object {
+        fun isTelevision(ctx: Context): Boolean {
+            val uiMode = ctx.getSystemService(UiModeManager::class.java)?.currentModeType
+            val pm = ctx.packageManager
+            return uiMode == Configuration.UI_MODE_TYPE_TELEVISION ||
+                    pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK) ||
+                    !pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+        }
     }
 }
